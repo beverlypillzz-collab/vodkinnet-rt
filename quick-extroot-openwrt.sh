@@ -246,15 +246,6 @@ verify_config() {
 # Main
 # =============================================================================
 main() {
-    echo ""
-    echo "============================================="
-    echo "  !Vodkin greets you!"
-    echo "  OpenWrt ExtRoot Setup Script"
-    echo "  Supports: opkg (23.x) and apk (24.x+)"
-    echo "  v2.0 — with verification & fixes"
-    echo "============================================="
-    echo ""
-
     detect_pkg_manager
     install_packages
     detect_disk
@@ -272,7 +263,5 @@ main() {
     sleep 5
     reboot
 }
-
-main "$@"
 
 main "$@"
