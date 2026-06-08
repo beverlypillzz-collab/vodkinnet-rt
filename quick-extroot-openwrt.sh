@@ -3,7 +3,7 @@
 echo ""
 echo "============================================="
 echo "  !Vodkin greets you!"
-echo "  OpenWrt ExtRoot Setup Script v2.0"
+echo "  OpenWrt ExtRoot Setup Script v3.0"
 echo "============================================="
 echo ""
 
@@ -59,25 +59,39 @@ install_packages() {
     $PKG_INSTALL kmod-usb-storage-uas 2>/dev/null && \
         log "UAS support installed (SSD)" || \
         info "UAS support not available, skipping"
+}
 
-    # Enable fstab service — критично для монтирования при загрузке
-    log "Enabling fstab service..."
-    service fstab enable 2>/dev/null || block enable 2>/dev/null || \
-        warn "Could not enable fstab service automatically"
+# =============================================================================
+# Wait for USB disk to appear
+# =============================================================================
+wait_for_disk() {
+    log "Waiting for USB storage device..."
+    local retries=10
+    while [ $retries -gt 0 ]; do
+        if ls /dev/sd* > /dev/null 2>&1; then
+            log "USB device detected"
+            return 0
+        fi
+        warn "No USB device found, waiting 3s... ($retries attempts left)"
+        sleep 3
+        retries=$((retries - 1))
+    done
+    error "No USB device appeared after waiting. Plug in USB and restart script."
 }
 
 # =============================================================================
 # Detect USB disk
 # =============================================================================
 detect_disk() {
-    log "Detecting USB storage devices..."
+    wait_for_disk
+
     echo ""
     info "Devices in /sys/block:"
     ls -l /sys/block | grep -v "loop\|ram\|mtd\|ubi" || true
 
     echo ""
     info "Available /dev/sd* devices:"
-    ls /dev/sd* 2>/dev/null || info "No /dev/sd* devices found yet — plug in USB and retry"
+    ls /dev/sd* 2>/dev/null || true
 
     echo ""
     warn "Enter the disk to use for extroot (e.g. /dev/sda):"
@@ -104,7 +118,6 @@ partition_disk() {
     log "Waiting for partition to appear..."
     sleep 3
 
-    # Verify partition exists
     [ -b "$DEVICE" ] || error "Partition $DEVICE did not appear after partitioning"
 
     log "Formatting ${DEVICE} as ext4..."
@@ -117,12 +130,26 @@ partition_disk() {
 }
 
 # =============================================================================
+# Generate fstab via block detect (ключевой шаг!)
+# =============================================================================
+generate_fstab() {
+    log "Generating fstab via block detect..."
+
+    # Генерируем базовый fstab через block detect
+    block detect > /etc/config/fstab || error "block detect failed"
+
+    log "fstab generated:"
+    cat /etc/config/fstab
+    echo ""
+}
+
+# =============================================================================
 # Configure extroot fstab
 # =============================================================================
 configure_extroot() {
     log "Configuring extroot mount..."
 
-    # Получаем UUID напрямую через blkid если block не отдаёт
+    # UUID через block info
     UUID="$(block info "$DEVICE" | grep -o 'UUID="[^"]*"' | cut -d'"' -f2)"
 
     if [ -z "$UUID" ]; then
@@ -133,12 +160,12 @@ configure_extroot() {
     [ -n "$UUID" ] || error "Could not determine UUID of $DEVICE"
     info "UUID: $UUID"
 
-    # Находим точку монтирования overlay
+    # Находим overlay
     MOUNT="$(block info | grep -o 'MOUNT="[^"]*/overlay"' | cut -d'"' -f2)"
     [ -n "$MOUNT" ] || MOUNT="/overlay"
     info "Overlay mount point: $MOUNT"
 
-    # Записываем в fstab
+    # Записываем extroot
     uci -q delete fstab.extroot
     uci set fstab.extroot="mount"
     uci set fstab.extroot.uuid="$UUID"
@@ -146,11 +173,16 @@ configure_extroot() {
     uci set fstab.extroot.enabled="1"
     uci commit fstab
 
-    # Проверяем что записалось
+    # Проверяем UUID
     SAVED_UUID="$(uci get fstab.extroot.uuid 2>/dev/null)"
-    [ "$SAVED_UUID" = "$UUID" ] || error "UUID mismatch after saving! Got: $SAVED_UUID"
+    [ "$SAVED_UUID" = "$UUID" ] || error "UUID mismatch! Saved: $SAVED_UUID | Real: $UUID"
 
-    log "extroot fstab entry configured and verified (UUID: $UUID)"
+    # Глобальные настройки fstab
+    uci set fstab.@global[0].auto_mount="1" 2>/dev/null || true
+    uci set fstab.@global[0].auto_swap="1" 2>/dev/null || true
+    uci commit fstab 2>/dev/null || true
+
+    log "extroot configured (UUID: $UUID)"
 }
 
 # =============================================================================
@@ -162,7 +194,7 @@ configure_rwm() {
     ORIG="$(block info | sed -n -e '/MOUNT="[^"]*\/overlay"/s/:[[:space:]].*$//p')"
 
     if [ -z "$ORIG" ]; then
-        warn "Could not auto-detect original overlay device, trying common paths..."
+        warn "Could not auto-detect original overlay, trying common paths..."
         for dev in /dev/ubi0_1 /dev/mtdblock3 /dev/mtdblock4; do
             [ -e "$dev" ] && ORIG="$dev" && break
         done
@@ -182,6 +214,22 @@ configure_rwm() {
 }
 
 # =============================================================================
+# Enable fstab service
+# =============================================================================
+enable_fstab() {
+    log "Enabling fstab service..."
+
+    /etc/init.d/fstab enable && log "fstab service enabled" || \
+        warn "Could not enable fstab via init.d"
+
+    /etc/init.d/fstab boot && log "fstab boot triggered" || \
+        warn "Could not trigger fstab boot"
+
+    # Fallback
+    block mount 2>/dev/null && log "block mount OK" || true
+}
+
+# =============================================================================
 # Transfer overlay data
 # =============================================================================
 transfer_data() {
@@ -198,7 +246,7 @@ transfer_data() {
 }
 
 # =============================================================================
-# Verify fstab config before reboot
+# Verify config before reboot
 # =============================================================================
 verify_config() {
     log "Verifying configuration..."
@@ -220,24 +268,14 @@ verify_config() {
     df -h
     echo ""
 
-    # Финальная проверка UUID
     SAVED_UUID="$(uci get fstab.extroot.uuid 2>/dev/null)"
     REAL_UUID="$(block info "$DEVICE" | grep -o 'UUID="[^"]*"' | cut -d'"' -f2)"
 
     if [ "$SAVED_UUID" = "$REAL_UUID" ]; then
         log "UUID match confirmed: $SAVED_UUID"
     else
-        error "UUID MISMATCH! Saved: $SAVED_UUID | Real: $REAL_UUID — fix before reboot!"
+        error "UUID MISMATCH! Saved: $SAVED_UUID | Real: $REAL_UUID"
     fi
-
-    # Проверяем что fstab включён
-    FSTAB_ENABLED="$(uci get fstab.@global[0].auto_mount 2>/dev/null)"
-    info "fstab auto_mount: ${FSTAB_ENABLED:-not set}"
-
-    # Включаем глобально
-    uci set fstab.@global[0].auto_mount="1" 2>/dev/null || true
-    uci set fstab.@global[0].auto_swap="1" 2>/dev/null || true
-    uci commit fstab 2>/dev/null || true
 
     log "Configuration verified successfully"
 }
@@ -250,15 +288,17 @@ main() {
     install_packages
     detect_disk
     partition_disk
+    generate_fstab
     configure_extroot
     configure_rwm
+    enable_fstab
     transfer_data
     verify_config
 
     echo ""
     log "ExtRoot setup complete!"
-    warn "After reboot, run: df -h — overlay should show external disk size"
-    warn "If overlay is still small after reboot, check: block info && mount | grep overlay"
+    warn "After reboot check: df -h — overlay should show external disk size"
+    warn "If still small: block info && mount | grep overlay"
     log "Rebooting in 5 seconds... (Ctrl+C to cancel)"
     sleep 5
     reboot
