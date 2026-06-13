@@ -2,7 +2,7 @@
 
 echo ""
 echo "============================================="
-echo "  !Vodkin greets you!"
+echo "  !VODKIN GREETS YOU!"
 echo "  OpenWrt ExtRoot Setup Script v3.0"
 echo "============================================="
 echo ""
