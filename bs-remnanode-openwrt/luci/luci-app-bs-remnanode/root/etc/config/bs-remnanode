@@ -1,0 +1,5 @@
+config bs-remnanode 'main'
+    option node_port '2222'
+    option secret_key ''
+    option xtls_api_port '61000'
+    option xray_bin '/usr/bin/xray'

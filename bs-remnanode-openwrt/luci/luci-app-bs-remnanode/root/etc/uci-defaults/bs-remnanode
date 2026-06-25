@@ -1,0 +1,28 @@
+#!/bin/sh
+# Add bs-remnanode to LuCI menu under Services
+
+uci -q batch <<EOF
+set rpcd.bs_remnanode=rpcd
+set rpcd.bs_remnanode.command=/usr/libexec/rpcd/bs-remnanode
+commit rpcd
+EOF
+
+# Create menu entry
+mkdir -p /usr/share/luci/menu.d
+cat > /usr/share/luci/menu.d/bs-remnanode.json << 'MENU'
+{
+  "admin/services/bs-remnanode": {
+    "title": "BS RemnaNode",
+    "order": 75,
+    "action": {
+      "type": "view",
+      "path": "bs-remnanode/main"
+    },
+    "depends": {
+      "acl": "luci-app-bs-remnanode"
+    }
+  }
+}
+MENU
+
+exit 0
