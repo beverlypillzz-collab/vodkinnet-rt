@@ -38,7 +38,7 @@ echo "       installed to $INSTALL_BIN"
 # --- Install xray-core ---
 echo "[3/5] Installing xray-core..."
 # Try OpenWrt package first (no GitHub needed, fast)
-if apk add xray 2>/dev/null; then
+if apk add xray-core 2>/dev/null; then
     echo "       installed via apk"
 else
     echo "       apk package not found, trying mirrors..."
