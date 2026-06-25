@@ -10,7 +10,7 @@ UCI_CONFIG="/etc/config/bs-remnanode"
 
 echo "============================================="
 echo "  !VODKIN GREETS YOU!"
-echo "  BS RemnaNode Installer for OpenWrt v1.2"
+echo "  BS RemnaNode Installer for OpenWrt v1.4"
 echo "============================================="
 echo ""
 
@@ -25,7 +25,7 @@ esac
 echo "[i] Architecture: $ARCH"
 
 # --- Cleanup previous installation ---
-echo "[0/6] Cleaning previous installation..."
+echo "[0/7] Cleaning previous installation..."
 if [ -f "$INIT_SCRIPT" ]; then
     "$INIT_SCRIPT" stop 2>/dev/null
     "$INIT_SCRIPT" disable 2>/dev/null
@@ -34,20 +34,19 @@ rm -f "$INSTALL_BIN"
 rm -f "$INIT_SCRIPT"
 rm -f "$UCI_CONFIG"
 rm -rf "$CONFIG_DIR"
-# Remove duplicate firewall rules from previous installs
-while uci delete firewall.@rule[-1] 2>/dev/null; do
-    RULE_NAME=$(uci get firewall.@rule[-1].name 2>/dev/null)
-    if [ "$RULE_NAME" = "bs-remnanode" ]; then
-        uci delete firewall.@rule[-1] 2>/dev/null
-    else
-        break
-    fi
+rm -f /usr/share/luci/menu.d/luci-app-bs-remnanode.json
+rm -f /www/luci-static/resources/view/bs-remnanode/main.js
+rm -f /usr/share/rpcd/acl.d/luci-app-bs-remnanode.json
+# Remove duplicate firewall rules
+uci -q show firewall | grep "name='bs-remnanode'" | while read line; do
+    idx=$(echo "$line" | sed "s/firewall\.@rule\[\([0-9]*\)\].*/\1/")
+    uci -q delete "firewall.@rule[$idx]" 2>/dev/null
 done
 uci commit firewall 2>/dev/null
 echo "      OK: cleaned"
 
-# --- Install curl if missing ---
-echo "[1/6] Installing dependencies..."
+# --- Install dependencies ---
+echo "[1/7] Installing dependencies..."
 apk update >/dev/null 2>&1
 if ! command -v curl >/dev/null 2>&1; then
     apk add curl ca-bundle >/dev/null 2>&1
@@ -57,7 +56,7 @@ else
 fi
 
 # --- Download bs-remnanode binary ---
-echo "[2/6] Downloading bs-remnanode..."
+echo "[2/7] Downloading bs-remnanode..."
 BIN_URL="https://github.com/${REPO}/releases/latest/download/bs-remnanode_${ARCH}"
 if curl -fsSL --max-time 60 "$BIN_URL" -o "$INSTALL_BIN" 2>/dev/null; then
     chmod +x "$INSTALL_BIN"
@@ -67,25 +66,22 @@ else
 fi
 
 # --- Install xray-core ---
-echo "[3/6] Installing xray-core..."
+echo "[3/7] Installing xray-core..."
 if [ -f /usr/bin/xray ]; then
-    echo "      OK: xray already installed at /usr/bin/xray"
+    echo "      OK: xray already installed"
 elif apk add xray-core 2>/dev/null; then
-    echo "      OK: installed via apk add xray-core"
+    echo "      OK: installed via apk"
 else
-    echo "      [!] Could not install xray-core, install manually: apk add xray-core"
+    echo "      [!] Could not install xray-core, run: apk add xray-core"
 fi
 
 # --- Install luci-app-firewall ---
-echo "[4/6] Installing luci-app-firewall..."
-if apk add luci-app-firewall >/dev/null 2>&1; then
-    echo "      OK: luci-app-firewall installed"
-else
-    echo "      OK: already installed or not needed"
-fi
+echo "[4/7] Installing luci-app-firewall..."
+apk add luci-app-firewall >/dev/null 2>&1
+echo "      OK: done"
 
 # --- Create UCI config ---
-echo "[5/6] Creating config..."
+echo "[5/7] Creating config..."
 mkdir -p "$CONFIG_DIR"
 cat > "$UCI_CONFIG" << 'EOF'
 config bs-remnanode 'main'
@@ -94,10 +90,10 @@ config bs-remnanode 'main'
     option xtls_api_port '61000'
     option xray_bin '/usr/bin/xray'
 EOF
-echo "      OK: $UCI_CONFIG created"
+echo "      OK: $UCI_CONFIG"
 
-# --- Install init.d service (embedded) ---
-echo "[6/6] Installing init.d service..."
+# --- Install init.d service ---
+echo "[6/7] Installing init.d service..."
 cat > "$INIT_SCRIPT" << 'EOF'
 #!/bin/sh /etc/rc.common
 
@@ -117,7 +113,7 @@ start_service() {
     config_get xray_bin      main xray_bin      "/usr/bin/xray"
 
     if [ -z "$secret_key" ]; then
-        logger -t bs-remnanode "ERROR: SECRET_KEY not set in /etc/config/bs-remnanode"
+        logger -t bs-remnanode "ERROR: SECRET_KEY not set"
         return 1
     fi
 
@@ -135,43 +131,33 @@ start_service() {
 }
 
 stop_service() { return 0; }
-
 reload_service() { stop; start; }
 EOF
-
 chmod +x "$INIT_SCRIPT"
 /etc/init.d/bs-remnanode enable
 echo "      OK: init.d installed and enabled"
 
-# --- Open firewall port ---
-echo "[+] Opening firewall port 2222..."
-uci add firewall rule >/dev/null 2>&1
-uci set firewall.@rule[-1].name='bs-remnanode'
-uci set firewall.@rule[-1].src='wan'
-uci set firewall.@rule[-1].dest_port='2222'
-uci set firewall.@rule[-1].target='ACCEPT'
-uci set firewall.@rule[-1].proto='tcp'
-uci commit firewall
-/etc/init.d/firewall restart >/dev/null 2>&1
-echo "      OK: port 2222 opened on WAN"
-
-echo ""
-echo "============================================="
-echo "  Installation complete!"
-echo "============================================="
-echo ""
-echo "NEXT STEP — set SECRET_KEY from panel:"
-echo ""
-echo "  KEY='your_secret_key_from_panel'"
-echo "  uci set bs-remnanode.main.secret_key=\"\$KEY\""
-echo "  uci commit bs-remnanode"
-echo "  /etc/init.d/bs-remnanode start"
-echo ""
-echo "Check status:"
-echo "  netstat -tlnp | grep 2222"
-
 # --- Install LuCI app ---
-echo "[+] Installing LuCI app..."
+echo "[7/7] Installing LuCI app..."
+
+# ACL permissions
+mkdir -p /usr/share/rpcd/acl.d
+cat > /usr/share/rpcd/acl.d/luci-app-bs-remnanode.json << 'EOF'
+{
+  "luci-app-bs-remnanode": {
+    "description": "BS RemnaNode LuCI access",
+    "read": {
+      "uci": [ "bs-remnanode" ],
+      "ubus": {
+        "service": [ "list" ]
+      }
+    },
+    "write": {
+      "uci": [ "bs-remnanode" ]
+    }
+  }
+}
+EOF
 
 # Menu entry
 mkdir -p /usr/share/luci/menu.d
@@ -197,8 +183,6 @@ cat > /www/luci-static/resources/view/bs-remnanode/main.js << 'EOF'
 'use strict';
 'require view';
 'require form';
-'require uci';
-'require tools.widgets as widgets';
 
 return view.extend({
     render: function() {
@@ -210,21 +194,21 @@ return view.extend({
         s = m.section(form.TypedSection, 'main', _('Settings'));
         s.anonymous = true;
 
-        o = s.option(form.Value, 'secret_key', _('Secret Key'));
+        o = s.option(form.Value, 'secret_key', _('Secret Key'),
+            _('SECRET_KEY from Remnawave panel'));
         o.password = true;
         o.rmempty = false;
-        o.description = _('SECRET_KEY from Remnawave panel (Nodes → Management → Copy docker-compose.yml)');
 
-        o = s.option(form.Value, 'node_port', _('Node Port'));
+        o = s.option(form.Value, 'node_port', _('Node Port'),
+            _('Port for Remnawave panel (default: 2222)'));
         o.datatype = 'port';
         o.default = '2222';
-        o.description = _('Port for Remnawave panel connection');
 
         o = s.option(form.Value, 'xtls_api_port', _('XTLS API Port'));
         o.datatype = 'port';
         o.default = '61000';
 
-        o = s.option(form.Value, 'xray_bin', _('Xray Binary'));
+        o = s.option(form.Value, 'xray_bin', _('Xray Binary Path'));
         o.default = '/usr/bin/xray';
 
         return m.render();
@@ -232,11 +216,44 @@ return view.extend({
 
     handleSaveApply: function(ev) {
         return this.handleSave(ev).then(function() {
-            return L.resolveDefault(fs.exec('/etc/init.d/bs-remnanode', ['restart']));
+            return L.resolveDefault(L.Request.post('/cgi-bin/luci/command', {
+                cmd: '/etc/init.d/bs-remnanode restart'
+            }));
         });
     }
 });
 EOF
 
+/etc/init.d/rpcd restart 2>/dev/null
 echo "      OK: LuCI app installed"
-echo "      Refresh LuCI browser page to see Services -> BS RemnaNode"
+
+# --- Open firewall port ---
+echo "[+] Opening firewall port 2222..."
+uci add firewall rule >/dev/null 2>&1
+uci set firewall.@rule[-1].name='bs-remnanode'
+uci set firewall.@rule[-1].src='wan'
+uci set firewall.@rule[-1].dest_port='2222'
+uci set firewall.@rule[-1].target='ACCEPT'
+uci set firewall.@rule[-1].proto='tcp'
+uci commit firewall
+/etc/init.d/firewall restart >/dev/null 2>&1
+echo "      OK: port 2222 opened"
+
+echo ""
+echo "============================================="
+echo "  Installation complete!"
+echo "============================================="
+echo ""
+echo "NEXT STEP — set SECRET_KEY:"
+echo ""
+echo "  1. Open LuCI: Services -> BS RemnaNode"
+echo "     Enter SECRET_KEY from Remnawave panel"
+echo "     Click Save & Apply"
+echo ""
+echo "  OR via console:"
+echo "  KEY='your_key'"
+echo "  uci set bs-remnanode.main.secret_key=\"\$KEY\""
+echo "  uci commit bs-remnanode"
+echo "  /etc/init.d/bs-remnanode start"
+echo ""
+echo "  Check: netstat -tlnp | grep 2222"
