@@ -191,7 +191,7 @@ return view.extend({
         m = new form.Map('bs-remnanode', _('BS RemnaNode'),
             _('Native Remnawave node for OpenWrt. No Docker required.'));
 
-        s = m.section(form.TypedSection, 'main', _('Settings'));
+        s = m.section(form.NamedSection, 'main', _('Settings'));
         s.anonymous = true;
 
         o = s.option(form.Value, 'secret_key', _('Secret Key'),
