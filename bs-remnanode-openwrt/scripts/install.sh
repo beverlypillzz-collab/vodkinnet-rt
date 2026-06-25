@@ -169,3 +169,74 @@ echo "  /etc/init.d/bs-remnanode start"
 echo ""
 echo "Check status:"
 echo "  netstat -tlnp | grep 2222"
+
+# --- Install LuCI app ---
+echo "[+] Installing LuCI app..."
+
+# Menu entry
+mkdir -p /usr/share/luci/menu.d
+cat > /usr/share/luci/menu.d/luci-app-bs-remnanode.json << 'EOF'
+{
+  "admin/services/bs-remnanode": {
+    "title": "BS RemnaNode",
+    "order": 43,
+    "action": {
+      "type": "view",
+      "path": "bs-remnanode/main"
+    },
+    "depends": {
+      "uci": { "bs-remnanode": true }
+    }
+  }
+}
+EOF
+
+# View file
+mkdir -p /www/luci-static/resources/view/bs-remnanode
+cat > /www/luci-static/resources/view/bs-remnanode/main.js << 'EOF'
+'use strict';
+'require view';
+'require form';
+'require uci';
+'require tools.widgets as widgets';
+
+return view.extend({
+    render: function() {
+        var m, s, o;
+
+        m = new form.Map('bs-remnanode', _('BS RemnaNode'),
+            _('Native Remnawave node for OpenWrt. No Docker required.'));
+
+        s = m.section(form.TypedSection, 'main', _('Settings'));
+        s.anonymous = true;
+
+        o = s.option(form.Value, 'secret_key', _('Secret Key'));
+        o.password = true;
+        o.rmempty = false;
+        o.description = _('SECRET_KEY from Remnawave panel (Nodes → Management → Copy docker-compose.yml)');
+
+        o = s.option(form.Value, 'node_port', _('Node Port'));
+        o.datatype = 'port';
+        o.default = '2222';
+        o.description = _('Port for Remnawave panel connection');
+
+        o = s.option(form.Value, 'xtls_api_port', _('XTLS API Port'));
+        o.datatype = 'port';
+        o.default = '61000';
+
+        o = s.option(form.Value, 'xray_bin', _('Xray Binary'));
+        o.default = '/usr/bin/xray';
+
+        return m.render();
+    },
+
+    handleSaveApply: function(ev) {
+        return this.handleSave(ev).then(function() {
+            return L.resolveDefault(fs.exec('/etc/init.d/bs-remnanode', ['restart']));
+        });
+    }
+});
+EOF
+
+echo "      OK: LuCI app installed"
+echo "      Refresh LuCI browser page to see Services -> BS RemnaNode"
