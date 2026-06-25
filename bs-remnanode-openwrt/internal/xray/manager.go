@@ -2,13 +2,23 @@ package xray
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/beverlypillzz-collab/Vodkinnet-RT/bs-remnanode-openwrt/internal/config"
 )
+
+// allowedXrayPaths restricts which binaries can be used as xray
+var allowedXrayPaths = []string{
+	"/usr/bin/xray",
+	"/usr/local/bin/xray",
+	"/opt/xray/xray",
+}
 
 type Manager struct {
 	cfg     *config.Config
@@ -21,10 +31,31 @@ func NewManager(cfg *config.Config) *Manager {
 	return &Manager{cfg: cfg}
 }
 
+// validateXrayBin checks that the xray binary path is in the allowed list
+func validateXrayBin(path string) error {
+	// Resolve any symlinks/relative paths
+	clean := filepath.Clean(path)
+	for _, allowed := range allowedXrayPaths {
+		if clean == allowed {
+			return nil
+		}
+	}
+	// Also allow if path starts with /usr/bin/ or /usr/local/bin/
+	if strings.HasPrefix(clean, "/usr/bin/") || strings.HasPrefix(clean, "/usr/local/bin/") {
+		return nil
+	}
+	return fmt.Errorf("xray binary path %q is not in allowed list", path)
+}
+
 // Start or restart xray with a new config JSON
 func (m *Manager) Start(configJSON json.RawMessage) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Validate xray binary path before executing
+	if err := validateXrayBin(m.cfg.XrayBin); err != nil {
+		return fmt.Errorf("invalid xray binary: %w", err)
+	}
 
 	// Stop existing process
 	if m.cmd != nil && m.running {
@@ -34,15 +65,15 @@ func (m *Manager) Start(configJSON json.RawMessage) error {
 		m.running = false
 	}
 
-	// Write config to disk
-	if err := os.MkdirAll("/etc/bs-remnanode", 0755); err != nil {
+	// Write config to disk with restricted permissions (0600 = owner only)
+	if err := os.MkdirAll("/etc/bs-remnanode", 0750); err != nil {
 		return err
 	}
-	if err := os.WriteFile(m.cfg.XrayConfig, configJSON, 0644); err != nil {
+	if err := os.WriteFile(m.cfg.XrayConfig, configJSON, 0600); err != nil {
 		return err
 	}
 
-	log.Printf("[xray] starting %s with config %s", m.cfg.XrayBin, m.cfg.XrayConfig)
+	log.Printf("[xray] starting %s", m.cfg.XrayBin)
 
 	m.cmd = exec.Command(m.cfg.XrayBin, "run", "-config", m.cfg.XrayConfig)
 	m.cmd.Stdout = os.Stdout

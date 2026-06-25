@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,6 +15,10 @@ import (
 	"github.com/beverlypillzz-collab/Vodkinnet-RT/bs-remnanode-openwrt/internal/xray"
 )
 
+const (
+	maxBodySize = 5 << 20 // 5 MB
+)
+
 type Server struct {
 	cfg  *config.Config
 	xm   *xray.Manager
@@ -24,10 +29,7 @@ func NewServer(cfg *config.Config, xm *xray.Manager) *Server {
 	s := &Server{cfg: cfg, xm: xm}
 	mux := http.NewServeMux()
 
-	// Auth middleware applied to all routes
 	mux.HandleFunc("/", s.auth(s.notFound))
-
-	// node-contract endpoints
 	mux.HandleFunc("GET /api/node/health", s.auth(s.handleHealth))
 	mux.HandleFunc("GET /api/node/info", s.auth(s.handleInfo))
 	mux.HandleFunc("POST /api/node/start", s.auth(s.handleStart))
@@ -35,8 +37,11 @@ func NewServer(cfg *config.Config, xm *xray.Manager) *Server {
 	mux.HandleFunc("POST /api/node/restart", s.auth(s.handleRestart))
 
 	s.http = &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.NodePort),
-		Handler: mux,
+		Addr:         fmt.Sprintf(":%d", cfg.NodePort),
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 	return s
 }
@@ -51,11 +56,13 @@ func (s *Server) Shutdown(ctx context.Context) {
 
 // --- Middleware ---
 
+// auth uses constant-time comparison to prevent timing attacks
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := r.Header.Get("Authorization")
 		expected := "Bearer " + s.cfg.SecretKey
-		if token != expected {
+		// ConstantTimeCompare prevents timing-based token guessing
+		if subtle.ConstantTimeCompare([]byte(token), []byte(expected)) != 1 {
 			s.json(w, http.StatusUnauthorized, map[string]string{
 				"error": "unauthorized",
 			})
@@ -67,8 +74,6 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 
 // --- Handlers ---
 
-// GET /api/node/health
-// Panel polls this to check node liveness
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, map[string]interface{}{
 		"status": "ok",
@@ -76,31 +81,29 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GET /api/node/info
-// Panel fetches node metadata
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
 	s.json(w, http.StatusOK, map[string]interface{}{
-		"version":   "bs-remnanode/1.0.0",
+		"version":     "bs-remnanode/1.0.0",
 		"xrayRunning": s.xm.IsRunning(),
-		"os":        runtime.GOOS,
-		"arch":      runtime.GOARCH,
-		"memUsed":   m.Alloc,
-		"uptime":    time.Now().Unix(),
+		"os":          runtime.GOOS,
+		"arch":        runtime.GOARCH,
+		"memUsed":     m.Alloc,
+		"uptime":      time.Now().Unix(),
 	})
 }
 
-// POST /api/node/start
-// Body: {"config": <xray json config>}
-// Panel sends xray config and expects node to start xray with it
 func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
+	// Limit request body to prevent OOM on router
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+
 	var body struct {
 		Config json.RawMessage `json:"config"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		s.json(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		s.json(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
 	if body.Config == nil {
@@ -110,22 +113,22 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.xm.Start(body.Config); err != nil {
 		log.Printf("[api] failed to start xray: %v", err)
-		s.json(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		// Don't expose internal error details to caller
+		s.json(w, http.StatusInternalServerError, map[string]string{"error": "failed to start xray"})
 		return
 	}
 
 	s.json(w, http.StatusOK, map[string]string{"status": "started"})
 }
 
-// POST /api/node/stop
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	s.xm.Stop()
 	s.json(w, http.StatusOK, map[string]string{"status": "stopped"})
 }
 
-// POST /api/node/restart
-// Body: {"config": <xray json config>}  (optional — reuse existing if absent)
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+
 	var body struct {
 		Config json.RawMessage `json:"config"`
 	}
@@ -134,20 +137,18 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	if body.Config != nil {
 		if err := s.xm.Start(body.Config); err != nil {
 			log.Printf("[api] restart failed: %v", err)
-			s.json(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			s.json(w, http.StatusInternalServerError, map[string]string{"error": "failed to restart xray"})
 			return
 		}
 	} else {
-		// Restart with existing config file
 		s.xm.Stop()
-		// Read existing config
-		import_cfg, err := readExistingConfig(s.cfg.XrayConfig)
+		cfg, err := readExistingConfig(s.cfg.XrayConfig)
 		if err != nil {
-			s.json(w, http.StatusInternalServerError, map[string]string{"error": "no config available: " + err.Error()})
+			s.json(w, http.StatusInternalServerError, map[string]string{"error": "no config available"})
 			return
 		}
-		if err := s.xm.Start(import_cfg); err != nil {
-			s.json(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		if err := s.xm.Start(cfg); err != nil {
+			s.json(w, http.StatusInternalServerError, map[string]string{"error": "failed to restart xray"})
 			return
 		}
 	}
