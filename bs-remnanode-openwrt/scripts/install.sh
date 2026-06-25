@@ -3,7 +3,6 @@
 # Supports: aarch64 (Cudy WBR3000AX, MediaTek Filogic)
 
 REPO="beverlypillzz-collab/Vodkinnet-RT"
-SUBDIR="bs-remnanode-openwrt"
 INSTALL_BIN="/usr/bin/bs-remnanode"
 CONFIG_DIR="/etc/bs-remnanode"
 INIT_SCRIPT="/etc/init.d/bs-remnanode"
@@ -11,7 +10,7 @@ UCI_CONFIG="/etc/config/bs-remnanode"
 
 echo "============================================="
 echo "  !VODKIN GREETS YOU!"
-echo "  BS RemnaNode Installer for OpenWrt v1.1"
+echo "  BS RemnaNode Installer for OpenWrt v1.2"
 echo "============================================="
 echo ""
 
@@ -25,79 +24,79 @@ case "$MACHINE" in
 esac
 echo "[i] Architecture: $ARCH"
 
-# --- Helper: download with fallback ---
-download() {
-    URL="$1"
-    OUT="$2"
-    # Try curl first, then wget
-    if curl -fsSL --max-time 30 "$URL" -o "$OUT" 2>/dev/null; then
-        return 0
-    elif wget -q --timeout=30 "$URL" -O "$OUT" 2>/dev/null; then
-        return 0
+# --- Cleanup previous installation ---
+echo "[0/6] Cleaning previous installation..."
+if [ -f "$INIT_SCRIPT" ]; then
+    "$INIT_SCRIPT" stop 2>/dev/null
+    "$INIT_SCRIPT" disable 2>/dev/null
+fi
+rm -f "$INSTALL_BIN"
+rm -f "$INIT_SCRIPT"
+rm -f "$UCI_CONFIG"
+rm -rf "$CONFIG_DIR"
+# Remove duplicate firewall rules from previous installs
+while uci delete firewall.@rule[-1] 2>/dev/null; do
+    RULE_NAME=$(uci get firewall.@rule[-1].name 2>/dev/null)
+    if [ "$RULE_NAME" = "bs-remnanode" ]; then
+        uci delete firewall.@rule[-1] 2>/dev/null
+    else
+        break
     fi
-    return 1
-}
+done
+uci commit firewall 2>/dev/null
+echo "      OK: cleaned"
 
 # --- Install curl if missing ---
+echo "[1/6] Installing dependencies..."
+apk update >/dev/null 2>&1
 if ! command -v curl >/dev/null 2>&1; then
-    echo "[1/6] Installing curl..."
-    apk update >/dev/null 2>&1
     apk add curl ca-bundle >/dev/null 2>&1
+    echo "      OK: curl installed"
 else
-    echo "[1/6] curl already installed"
-    apk update >/dev/null 2>&1
+    echo "      OK: curl already present"
 fi
 
 # --- Download bs-remnanode binary ---
 echo "[2/6] Downloading bs-remnanode..."
-BIN_NAME="bs-remnanode_${ARCH}"
-BIN_URL="https://github.com/${REPO}/releases/latest/download/${BIN_NAME}"
-
-if download "$BIN_URL" "$INSTALL_BIN"; then
+BIN_URL="https://github.com/${REPO}/releases/latest/download/bs-remnanode_${ARCH}"
+if curl -fsSL --max-time 60 "$BIN_URL" -o "$INSTALL_BIN" 2>/dev/null; then
     chmod +x "$INSTALL_BIN"
     echo "      OK: $INSTALL_BIN"
 else
-    echo "[!] Failed to download bs-remnanode"
-    echo "    Try manually: wget $BIN_URL -O $INSTALL_BIN"
+    echo "      [!] Failed to download bs-remnanode"
 fi
 
-# --- Install xray-core via apk ---
+# --- Install xray-core ---
 echo "[3/6] Installing xray-core..."
 if [ -f /usr/bin/xray ]; then
-    echo "      OK: xray already installed"
+    echo "      OK: xray already installed at /usr/bin/xray"
 elif apk add xray-core 2>/dev/null; then
-    echo "      OK: installed via apk"
+    echo "      OK: installed via apk add xray-core"
 else
-    echo "[!] Could not install xray-core via apk"
-    echo "    Try manually: apk add xray-core"
+    echo "      [!] Could not install xray-core, install manually: apk add xray-core"
 fi
 
-# --- Install luci-app-firewall if missing ---
-echo "[4/6] Checking luci-app-firewall..."
-if ! apk info luci-app-firewall >/dev/null 2>&1; then
-    apk add luci-app-firewall >/dev/null 2>&1 && echo "      OK: luci-app-firewall installed" || echo "      [!] Could not install luci-app-firewall"
+# --- Install luci-app-firewall ---
+echo "[4/6] Installing luci-app-firewall..."
+if apk add luci-app-firewall >/dev/null 2>&1; then
+    echo "      OK: luci-app-firewall installed"
 else
-    echo "      OK: already installed"
+    echo "      OK: already installed or not needed"
 fi
 
-# --- Create UCI config if missing ---
-echo "[5/6] Setting up config..."
+# --- Create UCI config ---
+echo "[5/6] Creating config..."
 mkdir -p "$CONFIG_DIR"
-
-if [ ! -f "$UCI_CONFIG" ]; then
-    cat > "$UCI_CONFIG" << 'EOF'
+cat > "$UCI_CONFIG" << 'EOF'
 config bs-remnanode 'main'
     option node_port '2222'
     option secret_key ''
     option xtls_api_port '61000'
     option xray_bin '/usr/bin/xray'
 EOF
-    echo "      OK: created $UCI_CONFIG"
-else
-    echo "      OK: config exists"
-fi
+echo "      OK: $UCI_CONFIG created"
 
-# --- Install init.d service (embedded, no download needed) ---
+# --- Install init.d service (embedded) ---
 echo "[6/6] Installing init.d service..."
 cat > "$INIT_SCRIPT" << 'EOF'
 #!/bin/sh /etc/rc.common
@@ -118,7 +117,7 @@ start_service() {
     config_get xray_bin      main xray_bin      "/usr/bin/xray"
 
     if [ -z "$secret_key" ]; then
-        logger -t bs-remnanode "ERROR: SECRET_KEY is not set in /etc/config/bs-remnanode"
+        logger -t bs-remnanode "ERROR: SECRET_KEY not set in /etc/config/bs-remnanode"
         return 1
     fi
 
@@ -135,14 +134,9 @@ start_service() {
     procd_close_instance
 }
 
-stop_service() {
-    return 0
-}
+stop_service() { return 0; }
 
-reload_service() {
-    stop
-    start
-}
+reload_service() { stop; start; }
 EOF
 
 chmod +x "$INIT_SCRIPT"
@@ -159,18 +153,19 @@ uci set firewall.@rule[-1].target='ACCEPT'
 uci set firewall.@rule[-1].proto='tcp'
 uci commit firewall
 /etc/init.d/firewall restart >/dev/null 2>&1
-echo "      OK: port 2222 opened"
+echo "      OK: port 2222 opened on WAN"
 
 echo ""
 echo "============================================="
 echo "  Installation complete!"
 echo "============================================="
 echo ""
-echo "NEXT STEP — set your SECRET_KEY from panel:"
+echo "NEXT STEP — set SECRET_KEY from panel:"
 echo ""
-echo "  uci set bs-remnanode.main.secret_key='KEY'"
+echo "  KEY='your_secret_key_from_panel'"
+echo "  uci set bs-remnanode.main.secret_key=\"\$KEY\""
 echo "  uci commit bs-remnanode"
 echo "  /etc/init.d/bs-remnanode start"
 echo ""
-echo "Then add node in Remnawave panel:"
-echo "  Nodes -> Management -> + -> WAN IP, port 2222"
+echo "Check status:"
+echo "  netstat -tlnp | grep 2222"
