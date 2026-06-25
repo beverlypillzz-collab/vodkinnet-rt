@@ -34,6 +34,8 @@ rm -f "$INSTALL_BIN"
 rm -f "$INIT_SCRIPT"
 rm -f "$UCI_CONFIG"
 rm -rf "$CONFIG_DIR"
+rm -f /usr/bin/xray
+apk del xray-core 2>/dev/null
 rm -f /usr/share/luci/menu.d/luci-app-bs-remnanode.json
 rm -f /www/luci-static/resources/view/bs-remnanode/main.js
 rm -f /usr/share/rpcd/acl.d/luci-app-bs-remnanode.json
