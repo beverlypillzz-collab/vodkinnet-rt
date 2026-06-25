@@ -5,6 +5,9 @@ on:
     tags:
       - 'bs-remnanode/v*'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build binaries
@@ -65,3 +68,4 @@ jobs:
             dist/bs-remnanode_armv7
             dist/bs-remnanode_x86_64
             bs-remnanode-openwrt/scripts/install.sh
+
