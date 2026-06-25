@@ -1,125 +1,176 @@
 #!/bin/sh
-# bs-remnanode installer for OpenWrt (aarch64 / Cudy WBR3000AX)
-# Usage: sh install.sh
+# bs-remnanode installer for OpenWrt
+# Supports: aarch64 (Cudy WBR3000AX, MediaTek Filogic)
 
 REPO="beverlypillzz-collab/Vodkinnet-RT"
 SUBDIR="bs-remnanode-openwrt"
-ARCH="aarch64"
-BIN_NAME="bs-remnanode_${ARCH}"
 INSTALL_BIN="/usr/bin/bs-remnanode"
 CONFIG_DIR="/etc/bs-remnanode"
-XRAY_BIN="/usr/bin/xray"
-XRAY_VERSION="v25.3.6"
+INIT_SCRIPT="/etc/init.d/bs-remnanode"
+UCI_CONFIG="/etc/config/bs-remnanode"
 
 echo "============================================="
 echo "  !VODKIN GREETS YOU!"
-echo "  BS RemnaNode Installer for OpenWrt v1.0"
+echo "  BS RemnaNode Installer for OpenWrt v1.1"
 echo "============================================="
 echo ""
 
-# --- Check architecture ---
+# --- Detect arch ---
 MACHINE=$(uname -m)
-if [ "$MACHINE" != "aarch64" ]; then
-    echo "WARNING: this installer is for aarch64, detected: $MACHINE"
-fi
+case "$MACHINE" in
+    aarch64) ARCH="aarch64" ;;
+    armv7*)  ARCH="armv7" ;;
+    x86_64)  ARCH="x86_64" ;;
+    *)       ARCH="aarch64"; echo "[!] Unknown arch $MACHINE, defaulting to aarch64" ;;
+esac
+echo "[i] Architecture: $ARCH"
 
-# --- Install dependencies ---
-echo "[1/5] Installing dependencies..."
-apk update
-apk add curl ca-bundle
+# --- Helper: download with fallback ---
+download() {
+    URL="$1"
+    OUT="$2"
+    # Try curl first, then wget
+    if curl -fsSL --max-time 30 "$URL" -o "$OUT" 2>/dev/null; then
+        return 0
+    elif wget -q --timeout=30 "$URL" -O "$OUT" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+# --- Install curl if missing ---
+if ! command -v curl >/dev/null 2>&1; then
+    echo "[1/6] Installing curl..."
+    apk update >/dev/null 2>&1
+    apk add curl ca-bundle >/dev/null 2>&1
+else
+    echo "[1/6] curl already installed"
+    apk update >/dev/null 2>&1
+fi
 
 # --- Download bs-remnanode binary ---
-echo "[2/5] Downloading bs-remnanode..."
-LATEST_URL="https://github.com/${REPO}/releases/latest/download/${BIN_NAME}"
-curl -fsSL "$LATEST_URL" -o "$INSTALL_BIN"
-chmod +x "$INSTALL_BIN"
-echo "       installed to $INSTALL_BIN"
+echo "[2/6] Downloading bs-remnanode..."
+BIN_NAME="bs-remnanode_${ARCH}"
+BIN_URL="https://github.com/${REPO}/releases/latest/download/${BIN_NAME}"
 
-# --- Install xray-core ---
-echo "[3/5] Installing xray-core..."
-# Try OpenWrt package first (no GitHub needed, fast)
-if apk add xray 2>/dev/null; then
-    echo "       installed via apk"
+if download "$BIN_URL" "$INSTALL_BIN"; then
+    chmod +x "$INSTALL_BIN"
+    echo "      OK: $INSTALL_BIN"
 else
-    echo "       apk package not found, trying mirrors..."
-    TMP_DIR=$(mktemp -d)
-    DOWNLOADED=0
-
-    for URL in \
-        "https://ghfast.top/https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-arm64-v8a.zip" \
-        "https://kkgithub.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-arm64-v8a.zip" \
-        "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-arm64-v8a.zip"
-    do
-        echo "       trying $URL ..."
-        if curl -fsSL --max-time 90 "$URL" -o "$TMP_DIR/xray.zip" 2>/dev/null; then
-            DOWNLOADED=1
-            break
-        elif wget -q --timeout=90 "$URL" -O "$TMP_DIR/xray.zip" 2>/dev/null; then
-            DOWNLOADED=1
-            break
-        fi
-    done
-
-    if [ "$DOWNLOADED" = "1" ]; then
-        apk add unzip 2>/dev/null || true
-        unzip -o "$TMP_DIR/xray.zip" xray -d "$TMP_DIR/"
-        mv "$TMP_DIR/xray" "$XRAY_BIN"
-        chmod +x "$XRAY_BIN"
-        echo "       installed to $XRAY_BIN"
-    else
-        echo "[!] Could not download xray-core automatically."
-        echo "    Install manually after: apk add xray"
-        echo "    Or copy xray binary to /usr/bin/xray"
-    fi
-    rm -rf "$TMP_DIR"
+    echo "[!] Failed to download bs-remnanode"
+    echo "    Try manually: wget $BIN_URL -O $INSTALL_BIN"
 fi
 
-# --- Create config dir ---
-echo "[4/5] Creating config directory..."
+# --- Install xray-core via apk ---
+echo "[3/6] Installing xray-core..."
+if [ -f /usr/bin/xray ]; then
+    echo "      OK: xray already installed"
+elif apk add xray-core 2>/dev/null; then
+    echo "      OK: installed via apk"
+else
+    echo "[!] Could not install xray-core via apk"
+    echo "    Try manually: apk add xray-core"
+fi
+
+# --- Install luci-app-firewall if missing ---
+echo "[4/6] Checking luci-app-firewall..."
+if ! apk info luci-app-firewall >/dev/null 2>&1; then
+    apk add luci-app-firewall >/dev/null 2>&1 && echo "      OK: luci-app-firewall installed" || echo "      [!] Could not install luci-app-firewall"
+else
+    echo "      OK: already installed"
+fi
+
+# --- Create UCI config if missing ---
+echo "[5/6] Setting up config..."
 mkdir -p "$CONFIG_DIR"
 
-# Copy default UCI config if not exists
-if [ ! -f /etc/config/bs-remnanode ]; then
-    cat > /etc/config/bs-remnanode << 'EOF'
+if [ ! -f "$UCI_CONFIG" ]; then
+    cat > "$UCI_CONFIG" << 'EOF'
 config bs-remnanode 'main'
     option node_port '2222'
     option secret_key ''
     option xtls_api_port '61000'
     option xray_bin '/usr/bin/xray'
 EOF
+    echo "      OK: created $UCI_CONFIG"
+else
+    echo "      OK: config exists"
 fi
 
-# --- Install init.d service ---
-echo "[5/5] Installing init.d service..."
-INIT_URL="https://raw.githubusercontent.com/${REPO}/main/${SUBDIR}/luci/luci-app-bs-remnanode/root/etc/init.d/bs-remnanode"
-curl -fsSL "$INIT_URL" -o /etc/init.d/bs-remnanode
-chmod +x /etc/init.d/bs-remnanode
+# --- Install init.d service (embedded, no download needed) ---
+echo "[6/6] Installing init.d service..."
+cat > "$INIT_SCRIPT" << 'EOF'
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+USE_PROCD=1
+
+PROG=/usr/bin/bs-remnanode
+
+start_service() {
+    local node_port secret_key xtls_api_port xray_bin
+
+    config_load bs-remnanode
+    config_get node_port     main node_port     "2222"
+    config_get secret_key    main secret_key    ""
+    config_get xtls_api_port main xtls_api_port "61000"
+    config_get xray_bin      main xray_bin      "/usr/bin/xray"
+
+    if [ -z "$secret_key" ]; then
+        logger -t bs-remnanode "ERROR: SECRET_KEY is not set in /etc/config/bs-remnanode"
+        return 1
+    fi
+
+    procd_open_instance
+    procd_set_param command "$PROG"
+    procd_set_param env \
+        NODE_PORT="$node_port" \
+        SECRET_KEY="$secret_key" \
+        XTLS_API_PORT="$xtls_api_port" \
+        XRAY_BIN="$xray_bin"
+    procd_set_param respawn 3600 5 5
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+}
+
+stop_service() {
+    return 0
+}
+
+reload_service() {
+    stop
+    start
+}
+EOF
+
+chmod +x "$INIT_SCRIPT"
 /etc/init.d/bs-remnanode enable
+echo "      OK: init.d installed and enabled"
 
-# --- Install LuCI app if LuCI is present ---
-if [ -d "/usr/lib/lua/luci" ]; then
-    echo "[+] LuCI detected, installing web UI..."
-    LUCI_URL="https://raw.githubusercontent.com/${REPO}/main/${SUBDIR}/luci/luci-app-bs-remnanode/htdocs/luci-static/resources/view/bs-remnanode/main.js"
-    mkdir -p /www/luci-static/resources/view/bs-remnanode
-    curl -fsSL "$LUCI_URL" -o /www/luci-static/resources/view/bs-remnanode/main.js
-fi
+# --- Open firewall port ---
+echo "[+] Opening firewall port 2222..."
+uci add firewall rule >/dev/null 2>&1
+uci set firewall.@rule[-1].name='bs-remnanode'
+uci set firewall.@rule[-1].src='wan'
+uci set firewall.@rule[-1].dest_port='2222'
+uci set firewall.@rule[-1].target='ACCEPT'
+uci set firewall.@rule[-1].proto='tcp'
+uci commit firewall
+/etc/init.d/firewall restart >/dev/null 2>&1
+echo "      OK: port 2222 opened"
 
 echo ""
 echo "============================================="
 echo "  Installation complete!"
 echo "============================================="
 echo ""
-echo "Next steps:"
-echo "  1. Set SECRET_KEY from Remnawave panel:"
-echo "       uci set bs-remnanode.main.secret_key='YOUR_KEY'"
-echo "       uci commit bs-remnanode"
+echo "NEXT STEP — set your SECRET_KEY from panel:"
 echo ""
-echo "  2. Start the service:"
-echo "       /etc/init.d/bs-remnanode start"
+echo "  uci set bs-remnanode.main.secret_key='KEY'"
+echo "  uci commit bs-remnanode"
+echo "  /etc/init.d/bs-remnanode start"
 echo ""
-echo "  3. Open firewall port (LuCI):"
-echo "       Network -> Firewall -> Traffic Rules"
-echo "       Allow WAN -> port 2222"
-echo ""
-echo "  4. Add node in Remnawave panel:"
-echo "       Nodes -> Management -> + -> WAN IP of this router"
+echo "Then add node in Remnawave panel:"
+echo "  Nodes -> Management -> + -> WAN IP, port 2222"
