@@ -1,0 +1,67 @@
+name: Build and Release bs-remnanode
+
+on:
+  push:
+    tags:
+      - 'bs-remnanode/v*'
+
+jobs:
+  build:
+    name: Build binaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build aarch64 (Cudy WBR3000AX / MediaTek Filogic)
+        working-directory: bs-remnanode-openwrt
+        run: |
+          GOOS=linux GOARCH=arm64 go build \
+            -ldflags="-s -w -X main.Version=${{ github.ref_name }}" \
+            -o ../dist/bs-remnanode_aarch64 \
+            ./cmd/remnanode/
+
+      - name: Build armv7 (older routers)
+        working-directory: bs-remnanode-openwrt
+        run: |
+          GOOS=linux GOARCH=arm GOARM=7 go build \
+            -ldflags="-s -w -X main.Version=${{ github.ref_name }}" \
+            -o ../dist/bs-remnanode_armv7 \
+            ./cmd/remnanode/
+
+      - name: Build x86_64 (x86 OpenWrt)
+        working-directory: bs-remnanode-openwrt
+        run: |
+          GOOS=linux GOARCH=amd64 go build \
+            -ldflags="-s -w -X main.Version=${{ github.ref_name }}" \
+            -o ../dist/bs-remnanode_x86_64 \
+            ./cmd/remnanode/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "bs-remnanode ${{ github.ref_name }}"
+          body: |
+            ## bs-remnanode – native Remnawave node for OpenWrt
+
+            No Docker required. Runs natively on OpenWrt routers.
+
+            ### Quick install (aarch64 / Cudy WBR3000AX):
+            ```sh
+            curl -fsSL https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/bs-remnanode-openwrt/scripts/install.sh | sh
+            ```
+
+            ### Supported architectures:
+            - `bs-remnanode_aarch64` — MediaTek Filogic, Cortex-A53 (Cudy WBR3000AX, WE3000AX)
+            - `bs-remnanode_armv7` — older ARM routers
+            - `bs-remnanode_x86_64` — x86 OpenWrt builds
+          files: |
+            dist/bs-remnanode_aarch64
+            dist/bs-remnanode_armv7
+            dist/bs-remnanode_x86_64
+            bs-remnanode-openwrt/scripts/install.sh
