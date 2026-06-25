@@ -13,7 +13,11 @@ CONFIG_DIR="/etc/bs-remnanode"
 XRAY_BIN="/usr/bin/xray"
 XRAY_VERSION="v25.3.6"
 
-echo "=== bs-remnanode installer ==="
+echo "============================================="
+echo "  !VODKIN GREETS YOU!"
+echo "  BS RemnaNode Installer for OpenWrt v1.0"
+echo "============================================="
+echo ""
 
 # --- Check architecture ---
 MACHINE=$(uname -m)
