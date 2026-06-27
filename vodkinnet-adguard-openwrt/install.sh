@@ -157,6 +157,21 @@ uci add_list adblock.global.adb_sources='oisd_small'
 uci commit adblock
 /etc/init.d/adblock reload
 
+# ── проверка статуса ──────────────────────────────────────────────────────────
+
+sleep 3
+STATUS=$(ubus call service list '{"name":"adblock"}' 2>/dev/null | grep -c '"running":true' || echo "0")
+if [ "$STATUS" -gt 0 ] 2>/dev/null; then
+    ok "adblock запущен успешно"
+else
+    # adblock грузит листы в фоне — проверяем через init.d
+    if /etc/init.d/adblock running 2>/dev/null; then
+        ok "adblock запущен успешно"
+    else
+        warn "adblock запускается в фоне — проверь статус через: /etc/init.d/adblock status"
+    fi
+fi
+
 # ── итог ──────────────────────────────────────────────────────────────────────
 
 echo ""
