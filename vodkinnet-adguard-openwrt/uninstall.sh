@@ -1,7 +1,8 @@
 #!/bin/sh
 # vodkinnet-adguard uninstaller
+# https://github.com/beverlypillzz-collab/Vodkinnet-RT
 
-set -e
+set -eu
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -32,6 +33,10 @@ rm -f /etc/config/adblock
 rm -f /var/log/adblock.log
 
 log "Перезапуск dnsmasq..."
-/etc/init.d/dnsmasq restart
+/etc/init.d/dnsmasq restart 2>/dev/null || true
+
+log "Перезапуск LuCI..."
+/etc/init.d/rpcd restart 2>/dev/null || true
+/etc/init.d/uhttpd restart 2>/dev/null || true
 
 ok "vodkinnet-adguard удалён"

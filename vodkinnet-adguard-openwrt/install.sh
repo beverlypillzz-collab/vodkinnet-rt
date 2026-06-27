@@ -3,7 +3,7 @@
 # https://github.com/beverlypillzz-collab/Vodkinnet-RT
 # Installs adblock (dibdot) pre-configured for podkop compatibility (DNS-only, no nftset)
 
-set -e
+set -eu
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -30,7 +30,7 @@ echo "  adblock installer v${VERSION} — podkop-safe"
 echo "  ${REPO}"
 echo ""
 
-# ── проверки ────────────────────────────────────────────────────────────────
+# ── проверки ─────────────────────────────────────────────────────────────────
 
 [ "$(id -u)" -eq 0 ] || die "Запусти от root"
 
@@ -54,7 +54,7 @@ else
     PODKOP_DETECTED=0
 fi
 
-# ── установка пакетов ────────────────────────────────────────────────────────
+# ── установка пакетов ─────────────────────────────────────────────────────────
 
 log "Обновление списка пакетов..."
 if [ "$PKG_MGR" = "apk" ]; then
@@ -72,77 +72,83 @@ fi
 
 ok "Пакеты установлены"
 
-# ── применение конфига ───────────────────────────────────────────────────────
+# ── применение конфига ────────────────────────────────────────────────────────
 
 log "Применение podkop-safe конфигурации..."
 
-# Сбрасываем до чистого состояния
 uci -q delete adblock.global 2>/dev/null || true
 uci set adblock.global=adblock
 
-# --- базовые настройки ---
+# DNS backend: dnsmasq plain mode, без nftset
 uci set adblock.global.adb_enabled='1'
-
-# DNS backend: dnsmasq (plain mode, без nftset)
 uci set adblock.global.adb_dns='dnsmasq'
 
-# КРИТИЧНО для podkop: отключаем nftset/firewall интеграцию
-# nftset конфликтует с nftables-правилами podkop
+# КРИТИЧНО для podkop: без nftset — не конфликтует с nftables podkop
 uci set adblock.global.adb_dnsvariant='dnsmasq'
 
-# Отключаем DNS reporting — он делает дополнительные DNS-запросы
-# которые могут выйти мимо FakeIP-туннеля podkop
+# Отключаем DNS reporting — побочные запросы мимо FakeIP podkop
 uci set adblock.global.adb_dns_report='0'
 
-# Отключаем nftables счётчики (не нужны, экономим ресурсы)
+# Отключаем nftables счётчики
 uci set adblock.global.adb_nftcnt='0'
 
-# --- источники блоклистов ---
-# Hagezi: отличный баланс блокировок без переблокировки
+# Блоклисты
 uci -q delete adblock.global.adb_sources 2>/dev/null || true
 uci add_list adblock.global.adb_sources='hagezi_normal'
 uci add_list adblock.global.adb_sources='oisd_small'
 
-# --- производительность ---
-# Параллельная загрузка листов
+# Производительность
 uci set adblock.global.adb_maxqueue='4'
 
-# Загрузка при старте с задержкой (даём dnsmasq/podkop подняться первыми)
+# Задержка старта — podkop и dnsmasq должны подняться первыми
 uci set adblock.global.adb_bootdelay='30'
 
-# Автообновление: раз в сутки в 03:00
+# Автообновление раз в сутки
 uci set adblock.global.adb_autoupdate='1'
 uci set adblock.global.adb_updatecycle='24'
 
-# --- логирование ---
+# Логирование
 uci set adblock.global.adb_loglevel='info'
 uci set adblock.global.adb_logfile='/var/log/adblock.log'
 
-uci commit adblock
+uci commit adblock || die "uci commit не удался"
 ok "Конфигурация применена"
 
-# ── запуск ───────────────────────────────────────────────────────────────────
-
-# ── патч LuCI ────────────────────────────────────────────────────────────────
+# ── патч LuCI ─────────────────────────────────────────────────────────────────
 
 MENU_FILE="/usr/share/luci/menu.d/luci-app-adblock.json"
-[ -f "$MENU_FILE" ] && sed -i 's/"title": "Adblock"/"title": "VodkinNet Adguard"/g' "$MENU_FILE"
-
-# патч заголовка и описания на странице
 VIEW_FILE="/www/luci-static/resources/view/adblock/overview.js"
-if [ -f "$VIEW_FILE" ]; then
-    sed -i "s|'Adblock'|'VodkinNet Adguard'|g" "$VIEW_FILE"
-    sed -i 's|"Adblock"|"VodkinNet Adguard"|g' "$VIEW_FILE"
-    sed -i "s|Configuration of the adblock package|VodkinNet DNS-based ad blocker|g" "$VIEW_FILE"
+
+if [ -f "$MENU_FILE" ]; then
+    # временный файл для безопасного sed
+    sed 's/"title": "Adblock"/"title": "VodkinNet Adguard"/g' "$MENU_FILE" > "${MENU_FILE}.tmp" \
+        && mv "${MENU_FILE}.tmp" "$MENU_FILE" \
+        || rm -f "${MENU_FILE}.tmp"
 fi
 
-# ── запуск ───────────────────────────────────────────────────────────────────
+if [ -f "$VIEW_FILE" ]; then
+    sed "s|'Adblock'|'VodkinNet Adguard'|g" "$VIEW_FILE" > "${VIEW_FILE}.tmp" \
+        && mv "${VIEW_FILE}.tmp" "$VIEW_FILE" \
+        || rm -f "${VIEW_FILE}.tmp"
+    sed 's|"Adblock"|"VodkinNet Adguard"|g' "$VIEW_FILE" > "${VIEW_FILE}.tmp" \
+        && mv "${VIEW_FILE}.tmp" "$VIEW_FILE" \
+        || rm -f "${VIEW_FILE}.tmp"
+    sed 's|Configuration of the adblock package|VodkinNet DNS-based ad blocker|g' "$VIEW_FILE" > "${VIEW_FILE}.tmp" \
+        && mv "${VIEW_FILE}.tmp" "$VIEW_FILE" \
+        || rm -f "${VIEW_FILE}.tmp"
+fi
+
+# применяем изменения LuCI
+/etc/init.d/rpcd restart 2>/dev/null || true
+/etc/init.d/uhttpd restart 2>/dev/null || true
+
+# ── запуск ────────────────────────────────────────────────────────────────────
 
 log "Включение и запуск adblock..."
-/etc/init.d/adblock enable
-/etc/init.d/adblock start
+/etc/init.d/adblock enable || die "Не удалось включить adblock"
+/etc/init.d/adblock start || die "Не удалось запустить adblock"
 
-# ── итог ─────────────────────────────────────────────────────────────────────
+# ── итог ──────────────────────────────────────────────────────────────────────
 
 echo ""
 echo "  ┌─────────────────────────────────────────────┐"
@@ -152,7 +158,8 @@ echo "  │  Режим:     DNS-only (dnsmasq)              │"
 echo "  │  nftset:    ВЫКЛЮЧЕН  ✓ podkop-safe         │"
 echo "  │  Листы:     hagezi_normal + oisd_small      │"
 echo "  │  Задержка:  30с (podkop стартует первым)    │"
-echo "  │  UI:        LuCI → Services → Adblock       │"
+echo "  │  UI:        LuCI → Services → VodkinNet     │"
+echo "  │             Adguard                         │"
 echo "  └─────────────────────────────────────────────┘"
 echo ""
 
