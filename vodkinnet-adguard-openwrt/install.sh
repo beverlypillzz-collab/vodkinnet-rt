@@ -84,7 +84,6 @@ uci set adblock.global.adb_enabled='1'
 uci set adblock.global.adb_dns='dnsmasq'
 
 # КРИТИЧНО для podkop: без nftset — не конфликтует с nftables podkop
-uci set adblock.global.adb_dnsvariant='dnsmasq'
 
 # Отключаем DNS reporting — побочные запросы мимо FakeIP podkop
 uci set adblock.global.adb_dns_report='0'
