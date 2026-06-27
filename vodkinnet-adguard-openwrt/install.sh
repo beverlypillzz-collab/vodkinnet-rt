@@ -123,6 +123,19 @@ ok "Конфигурация применена"
 
 # ── запуск ───────────────────────────────────────────────────────────────────
 
+# ── патч названия в LuCI ─────────────────────────────────────────────────────
+
+log "Переименование в LuCI..."
+MENU_FILE="/usr/share/luci/menu.d/luci-app-adblock.json"
+if [ -f "$MENU_FILE" ]; then
+    sed -i 's/"title": "Adblock"/"title": "VodkinNet Adguard"/g' "$MENU_FILE"
+    ok "LuCI: 'Adblock' → 'VodkinNet Adguard'"
+else
+    warn "menu.d файл не найден — название в LuCI останется стандартным"
+fi
+
+# ── запуск ───────────────────────────────────────────────────────────────────
+
 log "Включение и запуск adblock..."
 /etc/init.d/adblock enable
 /etc/init.d/adblock start
