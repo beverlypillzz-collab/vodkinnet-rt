@@ -34,8 +34,15 @@ echo ""
 
 [ "$(id -u)" -eq 0 ] || die "Запусти от root"
 
-if ! command -v opkg >/dev/null 2>&1; then
-    die "opkg не найден. Скрипт рассчитан на OpenWrt с opkg."
+# ── определяем пакетный менеджер (apk — OpenWrt 25.x, opkg — 24.x и старше) ─
+if command -v apk >/dev/null 2>&1; then
+    PKG_MGR="apk"
+    log "Пакетный менеджер: apk (OpenWrt 25.x)"
+elif command -v opkg >/dev/null 2>&1; then
+    PKG_MGR="opkg"
+    log "Пакетный менеджер: opkg (OpenWrt 24.x)"
+else
+    die "Не найден ни apk, ни opkg. Поддерживается OpenWrt 24.x и 25.x."
 fi
 
 log "Проверка совместимости с podkop..."
@@ -50,10 +57,18 @@ fi
 # ── установка пакетов ────────────────────────────────────────────────────────
 
 log "Обновление списка пакетов..."
-opkg update || die "opkg update не удался"
+if [ "$PKG_MGR" = "apk" ]; then
+    apk update || die "apk update не удался"
+else
+    opkg update || die "opkg update не удался"
+fi
 
 log "Установка adblock + luci-app-adblock..."
-opkg install adblock luci-app-adblock || die "Не удалось установить пакеты"
+if [ "$PKG_MGR" = "apk" ]; then
+    apk add adblock luci-app-adblock || die "Не удалось установить пакеты"
+else
+    opkg install adblock luci-app-adblock || die "Не удалось установить пакеты"
+fi
 
 ok "Пакеты установлены"
 

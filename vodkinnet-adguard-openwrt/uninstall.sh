@@ -19,7 +19,11 @@ log "Остановка adblock..."
 /etc/init.d/adblock disable 2>/dev/null || true
 
 log "Удаление пакетов..."
-opkg remove luci-app-adblock adblock 2>/dev/null || true
+if command -v apk >/dev/null 2>&1; then
+    apk del luci-app-adblock adblock 2>/dev/null || true
+else
+    opkg remove luci-app-adblock adblock 2>/dev/null || true
+fi
 
 log "Очистка конфига..."
 uci -q delete adblock.global 2>/dev/null || true
