@@ -27,7 +27,7 @@ podkop при старте перехватывает DNS через sing-box Fa
 ## Установка
 
 ```sh
-sh <(wget -O - https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-adguard/install.sh)
+sh <(wget -O - https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-adguard-openwrt/install.sh)
 ```
 
 Скрипт:
@@ -39,7 +39,7 @@ sh <(wget -O - https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-
 ## Удаление
 
 ```sh
-sh <(wget -O - https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-adguard/uninstall.sh)
+sh <(wget -O - https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-adguard-openwrt/uninstall.sh)
 ```
 
 ## Управление
