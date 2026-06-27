@@ -64,7 +64,8 @@ sh <(wget -O - https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-
 
 | Лист | Размер | Описание |
 |---|---|---|
-| `hagezi_normal` | ~700k доменов | Реклама, трекеры, фишинг |
+| `adguard` | ~L | Общая реклама
+| `adguard_tracking` | ~L | Трекеры и CNAME-трекинг |
 | `oisd_small` | ~50k доменов | Только самые агрессивные рекламные домены |
 
 Дополнительные листы можно добавить через LuCI или вручную:

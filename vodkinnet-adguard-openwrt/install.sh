@@ -94,7 +94,8 @@ uci set adblock.global.adb_nftcnt='0'
 
 # Блоклисты
 uci -q delete adblock.global.adb_sources 2>/dev/null || true
-uci add_list adblock.global.adb_sources='hagezi_normal'
+uci add_list adblock.global.adb_sources='adguard'
+uci add_list adblock.global.adb_sources='adguard_tracking'
 uci add_list adblock.global.adb_sources='oisd_small'
 
 # Производительность
@@ -151,7 +152,8 @@ log "Включение и запуск adblock..."
 # принудительно применяем наши листы (adblock при первом старте может взять свои дефолты)
 sleep 2
 uci -q delete adblock.global.adb_sources 2>/dev/null || true
-uci add_list adblock.global.adb_sources='hagezi_normal'
+uci add_list adblock.global.adb_sources='adguard'
+uci add_list adblock.global.adb_sources='adguard_tracking'
 uci add_list adblock.global.adb_sources='oisd_small'
 uci commit adblock
 /etc/init.d/adblock reload
@@ -164,7 +166,7 @@ echo "  │           vodkinnet-adguard готов           │"
 echo "  ├─────────────────────────────────────────────┤"
 echo "  │  Режим:     DNS-only (dnsmasq)              │"
 echo "  │  nftset:    ВЫКЛЮЧЕН  ✓ podkop-safe         │"
-echo "  │  Листы:     hagezi_normal + oisd_small      │"
+echo "  │  Листы:     adguard + adguard_tracking + oisd_small      │"
 echo "  │  Задержка:  30с (podkop стартует первым)    │"
 echo "  │  UI:        LuCI → Services → VodkinNet     │"
 echo "  │             Adguard                         │"
