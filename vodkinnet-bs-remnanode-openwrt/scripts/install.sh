@@ -152,7 +152,7 @@ mkdir -p /usr/share/rpcd/acl.d
 cat > /usr/share/rpcd/acl.d/luci-app-bs-remnanode.json << 'EOF'
 {
   "luci-app-bs-remnanode": {
-    "description": "BS RemnaNode LuCI access",
+    "description": "VodkinNet RemnaNode LuCI access",
     "read": {
       "uci": [ "bs-remnanode" ],
       "ubus": {
@@ -171,7 +171,7 @@ mkdir -p /usr/share/luci/menu.d
 cat > /usr/share/luci/menu.d/luci-app-bs-remnanode.json << 'EOF'
 {
   "admin/services/bs-remnanode": {
-    "title": "BS RemnaNode",
+    "title": "VodkinNet RemnaNode",
     "order": 43,
     "action": {
       "type": "view",
@@ -195,8 +195,8 @@ return view.extend({
     render: function() {
         var m, s, o;
 
-        m = new form.Map('bs-remnanode', _('BS RemnaNode'),
-            _('Native Remnawave node for OpenWrt. No Docker required.'));
+        m = new form.Map('bs-remnanode', _('VodkinNet RemnaNode'),
+            _('VodkinNet — native Remnawave node for OpenWrt'));
 
         s = m.section(form.NamedSection, 'main', _('Settings'));
         s.anonymous = true;
@@ -232,6 +232,7 @@ return view.extend({
 EOF
 
 /etc/init.d/rpcd restart 2>/dev/null
+/etc/init.d/uhttpd restart 2>/dev/null
 echo "      OK: LuCI app installed"
 
 # --- Open firewall port ---
@@ -253,7 +254,7 @@ echo "============================================="
 echo ""
 echo "NEXT STEP — set SECRET_KEY:"
 echo ""
-echo "  1. Open LuCI: Services -> BS RemnaNode"
+echo "  1. Open LuCI: Services -> VodkinNet RemnaNode"
 echo "     Enter SECRET_KEY from Remnawave panel"
 echo "     Click Save & Apply"
 echo ""
