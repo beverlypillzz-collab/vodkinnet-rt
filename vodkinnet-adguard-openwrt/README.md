@@ -1,4 +1,4 @@
-# vodkinnet-adguard
+# vodkinnet-adguard-openwrt
 
 > Часть экосистемы [VodkinNET](https://vodkin.net) — сетевые решения на базе OpenWrt
 
@@ -76,7 +76,7 @@ uci commit adblock
 ## Структура репозитория
 
 ```
-vodkinnet-adguard/
+vodkinnet-adguard-openwrt/
 ├── install.sh       # установщик
 ├── uninstall.sh     # деинсталлятор
 ├── config/
@@ -87,8 +87,8 @@ vodkinnet-adguard/
 
 ## Связанные проекты в Vodkinnet-RT
 
-- [`bs-remnanode-openwrt`](../bs-remnanode-openwrt/) — Remnawave Node для OpenWrt без Docker
-- [`quick-extroot-openwrt.sh`](../quick-extroot-openwrt.sh) — быстрая настройка extroot
+- [`vodkinnet-bs-remnanode-openwrt`](../vodkinnet-bs-remnanode-openwrt/) — Remnawave Node для OpenWrt без Docker
+- [`vodkinnet-quick-extroot-openwrt.sh`](../vodkinnet-quick-extroot-openwrt.sh) — быстрая настройка extroot
 
 ---
 

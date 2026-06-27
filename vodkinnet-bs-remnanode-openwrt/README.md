@@ -1,71 +1,46 @@
-# bs-remnanode-openwrt
+# vodkinnet-bs-remnanode-openwrt
 
-Native [Remnawave](https://docs.rw) node for OpenWrt routers. **No Docker required.**
+> Часть экосистемы [VodkinNET](https://vodkin.net) — сетевые решения на базе OpenWrt
 
-Написан на Go — один статический бинарник, никаких зависимостей. Работает напрямую на роутере как init.d-сервис.
+Native [Remnawave](https://docs.remnawave.com) node для OpenWrt роутеров. **Без Docker.**
 
-## Поддерживаемые роутеры
+Написан на Go — один статический бинарник, никаких зависимостей. Работает напрямую на роутере как init.d-сервис с LuCI-интерфейсом.
+
+## Поддерживаемые устройства
 
 | Устройство | Архитектура | Бинарник |
 |---|---|---|
-| Cudy WBR3000AX, WE3000AX (MediaTek Filogic) | aarch64 | `bs-remnanode_aarch64` |
+| Cudy WBR3000AX / WE3000AX (MediaTek Filogic) | aarch64 | `bs-remnanode_aarch64` |
 | Устаревшие ARM-роутеры | armv7 | `bs-remnanode_armv7` |
 | x86 OpenWrt | x86_64 | `bs-remnanode_x86_64` |
 
-## Быстрая установка
+## Требования
 
-На роутере с OpenWrt 23.05+:
+- OpenWrt 24.10 (opkg) или 25.12 (apk) — определяется автоматически
+- xray-core установлен на роутере
+- SECRET_KEY из панели Remnawave
+
+## Установка
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/bs-remnanode-openwrt/scripts/install.sh | sh
+sh <(wget -O - https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-bs-remnanode-openwrt/scripts/install.sh)
 ```
 
-## Ручная установка
-
-**1. Скачать бинарник:**
+После установки:
 ```sh
-curl -fsSL https://github.com/beverlypillzz-collab/Vodkinnet-RT/releases/latest/download/bs-remnanode_aarch64 -o /usr/bin/bs-remnanode
-chmod +x /usr/bin/bs-remnanode
-```
-
-**2. Скачать xray-core:**
-```sh
-curl -fsSL https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-arm64-v8a.zip -o /tmp/xray.zip
-unzip /tmp/xray.zip xray -d /tmp/
-mv /tmp/xray /usr/bin/xray
-chmod +x /usr/bin/xray
-```
-
-**3. Настроить:**
-```sh
-uci set bs-remnanode.main.node_port='2222'
 uci set bs-remnanode.main.secret_key='ВАШ_SECRET_KEY_ИЗ_ПАНЕЛИ'
 uci commit bs-remnanode
+/etc/init.d/bs-remnanode restart
 ```
 
-**4. Запустить:**
-```sh
-/etc/init.d/bs-remnanode enable
-/etc/init.d/bs-remnanode start
-```
-
-**5. Открыть порт в файрволе:**
-
-LuCI → Network → Firewall → Traffic Rules → Add:
-- Source zone: `wan`
-- Destination port: `2222` (или ваш NODE_PORT)
-- Action: `accept`
-
-**6. Добавить ноду в Remnawave:**
-
-Nodes → Management → `+` → укажи WAN IP роутера и NODE_PORT.
+Управление через **LuCI → Services → BS RemnaNode**.
 
 ## Архитектура
 
 ```
 Remnawave Panel
-      ↓ HTTPS (NODE_PORT)
- bs-remnanode (Go, init.d)
+      ↓ HTTPS (NODE_PORT 2222)
+vodkinnet-bs-remnanode (Go, init.d)
       ↓ управляет процессом
    xray-core (бинарник)
       ↓ VPN-протоколы
@@ -86,19 +61,20 @@ Remnawave Panel
 
 Все запросы требуют заголовок `Authorization: Bearer <SECRET_KEY>`.
 
-## Переменные окружения
+## UCI параметры
 
-| Переменная | По умолчанию | Описание |
+| Параметр | По умолчанию | Описание |
 |---|---|---|
-| `NODE_PORT` | `2222` | Порт для подключения панели |
-| `SECRET_KEY` | — | Ключ авторизации из панели (обязателен) |
-| `XTLS_API_PORT` | `61000` | Внутренний gRPC-порт xray |
-| `XRAY_BIN` | `/usr/bin/xray` | Путь к бинарнику xray |
-| `XRAY_CONFIG` | `/etc/bs-remnanode/xray.json` | Путь к конфигу xray |
+| `node_port` | `2222` | Порт для подключения панели |
+| `secret_key` | — | Ключ авторизации из панели (обязателен) |
+| `xray_bin` | `/usr/bin/xray` | Путь к бинарнику xray |
+| `xray_config` | `/etc/bs-remnanode/xray.json` | Путь к конфигу xray |
 
-## Сборка
+## Связанные проекты в Vodkinnet-RT
 
-```sh
-cd bs-remnanode-openwrt
-GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o bs-remnanode_aarch64 ./cmd/remnanode/
-```
+- [`vodkinnet-adguard-openwrt`](../vodkinnet-adguard-openwrt/) — adblock podkop-safe
+- [`vodkinnet-quick-extroot-openwrt.sh`](../vodkinnet-quick-extroot-openwrt.sh) — быстрая настройка extroot
+
+---
+
+[VodkinNET](https://vodkin.net) · [Telegram](https://t.me/BeFolaGaBot)
