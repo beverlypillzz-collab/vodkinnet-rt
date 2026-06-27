@@ -148,6 +148,14 @@ log "Включение и запуск adblock..."
 /etc/init.d/adblock enable || die "Не удалось включить adblock"
 /etc/init.d/adblock start || die "Не удалось запустить adblock"
 
+# принудительно применяем наши листы (adblock при первом старте может взять свои дефолты)
+sleep 2
+uci -q delete adblock.global.adb_sources 2>/dev/null || true
+uci add_list adblock.global.adb_sources='hagezi_normal'
+uci add_list adblock.global.adb_sources='oisd_small'
+uci commit adblock
+/etc/init.d/adblock reload
+
 # ── итог ──────────────────────────────────────────────────────────────────────
 
 echo ""
