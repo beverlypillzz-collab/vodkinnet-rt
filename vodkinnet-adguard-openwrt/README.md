@@ -36,6 +36,7 @@ sh <(wget -O - https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-
 3. Устанавливает `adblock` + `luci-app-adblock`
 4. Применяет podkop-safe конфиг
 5. Запускает сервис
+6. Переименовывает раздел в LuCI: Adblock → VodkinNet Adguard
 
 ## Удаление
 
@@ -45,7 +46,7 @@ sh <(wget -O - https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-
 
 ## Управление
 
-После установки доступно через **LuCI → Services → Adblock**.
+После установки доступно через **LuCI → Services → VodkinNet Adguard**.
 
 Из командной строки:
 ```sh
