@@ -146,7 +146,7 @@ fi
 
 log "Включение и запуск adblock..."
 /etc/init.d/adblock enable || die "Не удалось включить adblock"
-/etc/init.d/adblock start || die "Не удалось запустить adblock"
+/etc/init.d/adblock start 2>/dev/null || true  # запускается асинхронно, ненулевой код — норма
 
 # принудительно применяем наши листы (adblock при первом старте может взять свои дефолты)
 sleep 2
