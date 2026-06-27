@@ -1,0 +1,32 @@
+config adblock 'global'
+	# Включить adblock
+	option adb_enabled '1'
+
+	# DNS backend: только dnsmasq, plain mode
+	# НЕ менять на nftset — конфликтует с podkop!
+	option adb_dns 'dnsmasq'
+	option adb_dnsvariant 'dnsmasq'
+
+	# nftset/firewall интеграция: ОТКЛЮЧЕНА (podkop-safe)
+	option adb_nftcnt '0'
+
+	# DNS reporting отключён (доп. запросы мимо FakeIP podkop)
+	option adb_dns_report '0'
+
+	# Источники блоклистов
+	list adb_sources 'hagezi_normal'
+	list adb_sources 'oisd_small'
+
+	# Производительность
+	option adb_maxqueue '4'
+
+	# Задержка старта: podkop и dnsmasq должны подняться первыми
+	option adb_bootdelay '30'
+
+	# Автообновление раз в сутки
+	option adb_autoupdate '1'
+	option adb_updatecycle '24'
+
+	# Логирование
+	option adb_loglevel 'info'
+	option adb_logfile '/var/log/adblock.log'
