@@ -99,7 +99,7 @@ detect_disk() {
 
     echo ""
     warn "Enter the disk to use for extroot (e.g. /dev/sda):"
-    read -r DISK
+    read -r DISK < /dev/tty
 
     [ -b "$DISK" ] || error "Device $DISK not found or not a block device"
     log "Using disk: $DISK"
@@ -110,7 +110,7 @@ detect_disk() {
 # =============================================================================
 partition_disk() {
     warn "ALL DATA ON $DISK WILL BE ERASED! Continue? (yes/no)"
-    read -r CONFIRM
+    read -r CONFIRM < /dev/tty
     [ "$CONFIRM" = "yes" ] || error "Aborted by user"
 
     log "Partitioning $DISK..."
