@@ -13,7 +13,7 @@
 ## Установка
 
 ```sh
-sh <(wget -O - https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-quick-extroot-openwrt.sh?$(date +%s))
+sh <(wget -O - https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-quick-extroot-openwrt/install.sh?$(date +%s))
 ```
 
 `?$(date +%s)` добавлен, чтобы обойти кэш `raw.githubusercontent.com` (5–10 минут после пуша).
