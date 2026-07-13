@@ -231,78 +231,6 @@ flowchart LR
 
 <div align="center">
 
-<h2> Скриншоты интерфейса</h2>
-
-<table>
-<tr>
-<td align="center">
-
-<sub><i>(скриншот — сделай свежий после установки, палитра теперь оранж/красный VodkinNET)</i></sub>
-
-<br>
-<b>Hub-панель</b>
-<br>
-<sub>Карточки роутеров, статусы Online/Offline, LuCI, SSH, OpenWrt config и Client JSON.</sub>
-
-</td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td width="50%" align="center">
-
-<sub><i>(скриншот — сделай свежий после установки, палитра теперь оранж/красный VodkinNET)</i></sub>
-
-<br>
-<b>Вход в Hub</b>
-<br>
-<sub>Логин, пароль и простая капча для защиты панели.</sub>
-
-</td>
-<td width="50%" align="center">
-
-<sub><i>(скриншот — сделай свежий после установки, палитра теперь оранж/красный VodkinNET)</i></sub>
-
-<br>
-<b>Доступ и сессии</b>
-<br>
-<sub>Смена логина/пароля и управление активными сессиями.</sub>
-
-</td>
-</tr>
-<tr>
-<td width="50%" align="center">
-
-<sub><i>(скриншот — сделай свежий после установки, палитра теперь оранж/красный VodkinNET)</i></sub>
-
-<br>
-<b>Настройки роутера</b>
-<br>
-<sub>Router ID, Hub URL, токены, Xray, reverse tags и SSH параметры.</sub>
-
-</td>
-<td width="50%" align="center">
-
-<sub><i>(скриншот — сделай свежий после установки, палитра теперь оранж/красный VodkinNET)</i></sub>
-
-<br>
-<b>SSH Web Terminal</b>
-<br>
-<sub>Терминал OpenWrt прямо в браузере, удобно даже с телефона.</sub>
-
-</td>
-</tr>
-</table>
-
-</div>
-
----
-
----
-
-<div align="center">
-
 <h2> Обзор панели и настройка</h2>
 
 <b>Обзор панели и настройка</b><br>
@@ -315,16 +243,6 @@ flowchart LR
      width="720">
 
 <br><br>
-
-</div>
-
----
-
-<div align="center">
-
-<h2> Видео-демо</h2>
-
-<sub>Отдельного демо-видео для VodkinNET-версии пока нет — смотри статичные скриншоты выше.</sub>
 
 </div>
 
