@@ -1,0 +1,508 @@
+#!/bin/sh
+
+KEY_FILE="${KEY_FILE:-/etc/owrt-remote/web.key}"
+AGENT="${AGENT:-/usr/sbin/owrt-remote}"
+OWRT_REMOTE_UI_VERSION="2026-07-02-mobile-terminal-batch-v25"
+PARAMS_FILE="${TMPDIR:-/tmp}/owrt-remote-cgi.$$"
+RESULT_TITLE=""
+RESULT_BODY=""
+RESULT_KIND="info"
+SHOW_XRAY_SETTINGS="0"
+
+cleanup() {
+	rm -f "$PARAMS_FILE"
+}
+
+trap cleanup EXIT INT TERM
+
+html_escape() {
+	sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'
+}
+
+h() {
+	printf '%s' "$1" | html_escape
+}
+
+url_decode() {
+	local data
+	data="$(printf '%s' "$1" | sed 's/+/ /g; s/%/\\x/g')"
+	printf '%b' "$data"
+}
+
+parse_params() {
+	local data old_ifs pair key value
+	data="$1"
+	old_ifs="$IFS"
+	IFS='&'
+	for pair in $data; do
+		key="${pair%%=*}"
+		value="${pair#*=}"
+		[ "$pair" = "$key" ] && value=""
+		key="$(url_decode "$key" | tr -d '\r\n\t')"
+		[ -n "$key" ] && printf '%s\t%s\n' "$key" "$value" >>"$PARAMS_FILE"
+	done
+	IFS="$old_ifs"
+}
+
+param() {
+	local raw
+	raw="$(awk -F '	' -v k="$1" '$1 == k { print $2; exit }' "$PARAMS_FILE")"
+	url_decode "$raw"
+}
+
+has_param() {
+	awk -F '	' -v k="$1" '$1 == k { found = 1 } END { exit(found ? 0 : 1) }' "$PARAMS_FILE"
+}
+
+read_request() {
+	local post_data
+	: >"$PARAMS_FILE"
+	parse_params "${QUERY_STRING:-}"
+	case "${CONTENT_TYPE:-}" in
+		multipart/form-data*) return ;;
+	esac
+	if [ "${REQUEST_METHOD:-GET}" = "POST" ] && [ -n "${CONTENT_LENGTH:-}" ]; then
+		post_data="$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)"
+		parse_params "$post_data"
+	fi
+}
+
+http_html() {
+	printf 'Content-Type: text/html; charset=utf-8\r\n'
+	printf 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0\r\n'
+	printf 'Pragma: no-cache\r\n'
+	printf 'Expires: 0\r\n\r\n'
+}
+
+http_json() {
+	printf 'Content-Type: application/json; charset=utf-8\r\n'
+	printf 'Cache-Control: no-store\r\n\r\n'
+}
+
+web_key() {
+	cat "$KEY_FILE" 2>/dev/null
+}
+
+authorized() {
+	local expected supplied
+	expected="$(web_key)"
+	supplied="$(param key)"
+	[ -n "$expected" ] && [ "$supplied" = "$expected" ]
+}
+
+uci_get() {
+	local key default value
+	key="$1"
+	default="$2"
+	value="$(uci -q get "owrtremote.main.$key" 2>/dev/null || true)"
+	[ -n "$value" ] && {
+		printf '%s' "$value"
+		return
+	}
+	printf '%s' "$default"
+}
+
+uci_set() {
+	local key value
+	key="$1"
+	value="$2"
+	uci -q get owrtremote.main >/dev/null 2>&1 || uci set owrtremote.main=remote
+	uci set "owrtremote.main.$key=$value"
+}
+
+service_enabled() {
+	/etc/init.d/owrt-remote enabled >/dev/null 2>&1
+}
+
+xray_running() {
+	"$AGENT" status 2>/dev/null | grep -q '^xray_state: running'
+}
+
+set_result() {
+	RESULT_TITLE="$1"
+	RESULT_BODY="$2"
+	RESULT_KIND="${3:-info}"
+}
+
+save_config() {
+	local enabled field
+	if has_param enabled; then
+		enabled="1"
+	else
+		enabled="0"
+	fi
+	uci_set enabled "$enabled"
+
+	for field in router_id router_name role hub_url hub_token heartbeat_interval xray_bin xray_config vps_host vps_port vless_uuid vless_encryption vless_flow reverse_tag ssh_vless_uuid ssh_reverse_tag admin_host admin_port ssh_host ssh_port public_url; do
+		uci_set "$field" "$(param "$field")"
+	done
+	uci commit owrtremote
+	set_result "Настройки сохранены" "Если менял Xray или VPS-поля, перезапусти сервис." "ok"
+}
+
+clear_config() {
+	local field
+	for field in role public_url hub_url hub_token heartbeat_interval xray_bin xray_config vps_host vps_port vless_uuid vless_encryption vless_flow reverse_tag ssh_vless_uuid ssh_reverse_tag admin_host admin_port ssh_host ssh_port; do
+		uci -q delete "owrtremote.main.$field"
+	done
+	uci commit owrtremote
+	set_result "Конфигурация очищена" "Поля VPS, Xray, LuCI и SSH очищены. Router ID и название оставлены." "warn"
+}
+
+apply_xray_settings() {
+	local script script_file output rc
+	script="$(param xray_settings_script)"
+	output="${TMPDIR:-/tmp}/owrt-remote-apply.$$"
+	script_file="${TMPDIR:-/tmp}/owrt-remote-apply-script.$$"
+	rc=0
+	SHOW_XRAY_SETTINGS="1"
+
+	if [ -z "$(printf '%s' "$script" | tr -d '[:space:]')" ]; then
+		set_result "Xray настройки" "Вставь команды из OpenWrt config на VPS и нажми Применить." "warn"
+		return
+	fi
+
+	{
+		printf '%s\n' "#!/bin/sh"
+		printf '%s\n' "$script"
+	} >"$script_file"
+	chmod 600 "$script_file" 2>/dev/null || true
+
+	if sh "$script_file" >"$output" 2>&1; then
+		set_result "Xray настройки применены" "$(cat "$output")" "ok"
+	else
+		rc=$?
+		set_result "Ошибка применения Xray настроек" "$(cat "$output")
+rc=$rc" "bad"
+	fi
+	rm -f "$script_file" "$output"
+}
+
+run_action() {
+	local action output rc
+	action="$1"
+	output="${TMPDIR:-/tmp}/owrt-remote-action.$$"
+	rc=0
+	case "$action" in
+		start)
+			: >"$output"
+			uci_set enabled 1
+			uci commit owrtremote >>"$output" 2>&1 || rc=$?
+			/etc/init.d/owrt-remote enable >>"$output" 2>&1 || rc=$?
+			/etc/init.d/owrt-remote restart >>"$output" 2>&1 || rc=$?
+			set_result "Сервис запущен" "$(cat "$output")" "ok"
+			;;
+		stop)
+			: >"$output"
+			uci_set enabled 0
+			uci commit owrtremote >>"$output" 2>&1 || rc=$?
+			/etc/init.d/owrt-remote stop >>"$output" 2>&1 || rc=$?
+			"$AGENT" stop-xray >>"$output" 2>&1 || rc=$?
+			/etc/init.d/owrt-remote disable >>"$output" 2>&1 || rc=$?
+			"$AGENT" heartbeat >>"$output" 2>&1 || true
+			set_result "Сервис остановлен" "$(cat "$output")" "warn"
+			;;
+		restart)
+			: >"$output"
+			uci_set enabled 1
+			uci commit owrtremote >>"$output" 2>&1 || rc=$?
+			/etc/init.d/owrt-remote enable >>"$output" 2>&1 || rc=$?
+			/etc/init.d/owrt-remote restart >>"$output" 2>&1 || rc=$?
+			set_result "Сервис перезапущен" "$(cat "$output")" "ok"
+			;;
+		heartbeat)
+			"$AGENT" heartbeat >"$output" 2>&1 || rc=$?
+			if [ "$rc" = "0" ] && grep -q '"ok"[[:space:]]*:[[:space:]]*true' "$output"; then
+				set_result "Heartbeat" "OK: роутер отправил heartbeat на VPS, карточка обновлена." "ok"
+			else
+				set_result "Heartbeat" "$(cat "$output")" "ok"
+			fi
+			;;
+		doctor)
+			"$AGENT" doctor >"$output" 2>&1 || rc=$?
+			set_result "Проверка" "$(cat "$output")" "ok"
+			;;
+		install_xray_tmp)
+			if "$AGENT" install-xray-tmp >"$output" 2>&1; then
+				"$AGENT" render-client >>"$output" 2>&1 || rc=$?
+				/etc/init.d/owrt-remote restart >>"$output" 2>&1 || rc=$?
+			else
+				rc=$?
+			fi
+			set_result "Xray установлен в /tmp" "$(cat "$output")" "ok"
+			;;
+	esac
+	if [ "$rc" != "0" ]; then
+		set_result "$RESULT_TITLE" "$(cat "$output")" "bad"
+	fi
+	rm -f "$output"
+}
+
+field() {
+	local name label value type help
+	name="$1"
+	label="$2"
+	type="${3:-text}"
+	help="${4:-}"
+	value="$(uci_get "$name" '')"
+	printf '<label class="field"><span>%s</span>' "$(h "$label")"
+	if [ -n "$help" ]; then
+		printf '<small>%s</small>' "$(h "$help")"
+	fi
+	printf '<input name="%s" type="%s" value="%s" autocomplete="off">' "$(h "$name")" "$(h "$type")" "$(h "$value")"
+	printf '</label>'
+}
+
+metric() {
+	local label value tone
+	label="$1"
+	value="$2"
+	tone="${3:-}"
+	printf '<div class="metric %s"><span>%s</span><strong>%s</strong></div>' "$(h "$tone")" "$(h "$label")" "$(h "$value")"
+}
+
+metric_link() {
+	local label value href
+	label="$1"
+	value="$2"
+	href="$3"
+	printf '<div class="metric linkMetric"><span>%s</span><div class="metricLine"><strong>%s</strong><a class="miniGo" href="%s" target="_blank" rel="noopener noreferrer">Перейти</a></div></div>' "$(h "$label")" "$(h "$value")" "$(h "$href")"
+}
+
+render_unauthorized() {
+	http_html
+	cat <<'EOF'
+<!doctype html><html><head><meta charset="utf-8"><title>OpenWrt Remote</title></head>
+<body><h1>Доступ запрещен</h1><p>Открой панель из LuCI или по ссылке, которую показал install.sh.</p></body></html>
+EOF
+}
+
+render_page() {
+	local key router_id router_name hub_url service_state service_tone xray_state xray_tone enabled_checked status_text
+	key="$(param key)"
+	router_id="$(uci_get router_id main)"
+	router_name="$(uci_get router_name "$router_id")"
+	hub_url="$(uci_get hub_url '')"
+
+	if service_enabled; then
+		service_state="Включен"
+		service_tone="good"
+	else
+		service_state="Выключен"
+		service_tone="warn"
+	fi
+	if xray_running; then
+		xray_state="Запущен"
+		xray_tone="good"
+	else
+		xray_state="Остановлен"
+		xray_tone="bad"
+	fi
+	if [ "$(uci_get enabled 0)" = "1" ]; then
+		enabled_checked="checked"
+		status_text="Агент включен"
+	else
+		enabled_checked=""
+		status_text="Агент выключен"
+	fi
+
+	http_html
+	cat <<EOF
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="owrt-remote-ui-version" content="$OWRT_REMOTE_UI_VERSION">
+<title>OpenWrt Remote Hub</title>
+<style>
+:root{color-scheme:dark;--bg:#07040f;--panel:rgba(19,14,32,.88);--text:#f7f2ff;--muted:#b9adc9;--line:rgba(169,126,255,.24);--blue:#7c3aed;--green:#22c55e;--red:#fb7185;--amber:#f59e0b;--teal:#a855f7;--grid:rgba(168,85,247,.16)}
+*{box-sizing:border-box}body{position:relative;min-height:100vh;margin:0;overflow-x:hidden;background-color:var(--bg);background-image:radial-gradient(circle at 12% 8%,rgba(168,85,247,.46),transparent 31%),radial-gradient(circle at 82% 12%,rgba(79,70,229,.38),transparent 30%),radial-gradient(circle at 50% 105%,rgba(236,72,153,.26),transparent 35%),linear-gradient(145deg,#07040f,#120a24 48%,#05030a),repeating-linear-gradient(0deg,transparent 0 30px,var(--grid) 31px),repeating-linear-gradient(90deg,transparent 0 30px,var(--grid) 31px);background-size:130% 130%,140% 140%,135% 135%,100% 100%,31px 31px,31px 31px;background-attachment:fixed;color:var(--text);font:14px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;animation:bgFlow 22s ease-in-out infinite alternate}
+body::before{content:"";position:fixed;inset:-25%;z-index:0;pointer-events:none;background:conic-gradient(from 0deg at 50% 50%,rgba(168,85,247,.05),rgba(236,72,153,.38),rgba(59,130,246,.24),rgba(245,158,11,.16),rgba(168,85,247,.05));filter:blur(52px);opacity:.72;animation:auraSpin 32s linear infinite}
+@keyframes bgFlow{0%{background-position:0% 0%,100% 0%,50% 100%,0 0,0 0,0 0}50%{background-position:28% 18%,62% 26%,38% 82%,0 0,15px 24px,24px 15px}100%{background-position:48% 28%,42% 42%,74% 62%,0 0,30px 0,0 30px}}
+@keyframes auraSpin{from{transform:rotate(0deg) scale(1)}to{transform:rotate(360deg) scale(1.08)}}
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:22px}.hero{display:flex;gap:18px;align-items:flex-start;justify-content:space-between;padding:20px 0 18px;border-bottom:1px solid var(--line)}
+.brand{display:flex;gap:14px;align-items:center}.titleRow{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+h1{margin:0;font-size:28px;line-height:1.2;letter-spacing:0}.appBanner{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;min-width:132px;padding:8px 14px;border:1px solid rgba(34,211,238,.34);border-radius:999px;background:linear-gradient(110deg,rgba(34,211,238,.14),rgba(124,58,237,.24),rgba(236,72,153,.14));color:#f3e8ff;text-decoration:none;font-weight:800;font-size:13px;line-height:1;white-space:nowrap;box-shadow:0 10px 24px rgba(124,58,237,.16),inset 0 1px 0 rgba(255,255,255,.10);overflow:hidden}.appBanner::before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.20),transparent);transform:translateX(-120%);animation:bannerShine 6.2s ease-in-out infinite}.appBanner span{position:relative}.sub{margin:4px 0 0;color:var(--muted)}.topActions,.links{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.topActions{justify-content:flex-end;padding-top:42px}.links{margin-top:8px}.vpnCard{display:inline-flex;align-items:center}.uiPill{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;width:132px;min-width:132px;min-height:36px;padding:8px 14px;box-sizing:border-box;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.08);color:#f3e8ff;text-decoration:none;font-weight:800;font-size:13px;line-height:1;white-space:nowrap;overflow:hidden}.nethaven{border-color:rgba(34,211,238,.46);background:linear-gradient(110deg,rgba(14,165,233,.22),rgba(168,85,247,.24),rgba(34,197,94,.16));color:#ecfeff;box-shadow:0 14px 32px rgba(14,165,233,.18)}.nethaven::before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.24),transparent);transform:translateX(-120%);animation:bannerShine 5.8s ease-in-out infinite}.nethaven span{position:relative}.nethavenDot{position:relative;width:8px;height:8px;border-radius:50%;background:#22d3ee;box-shadow:0 0 14px #22d3ee;animation:pulseDot 2.8s ease-in-out infinite}.returnCard{display:inline-flex}.backBtn{width:auto;min-width:208px;background:#f59e0b;color:#160f06;box-shadow:0 10px 22px rgba(245,158,11,.22)}
+@keyframes bannerShine{0%,42%{transform:translateX(-120%)}70%,100%{transform:translateX(120%)}}@keyframes pulseDot{0%,100%{transform:scale(1);opacity:.72}50%{transform:scale(1.35);opacity:1}}
+.pill{min-width:118px;background:var(--panel);color:var(--muted)}.dot{width:9px;height:9px;border-radius:50%;background:var(--amber)}.dot.good{background:var(--green)}.dot.bad{background:var(--red)}
+.grid{display:grid;grid-template-columns:1fr;gap:16px;margin-top:18px}.panel{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;box-shadow:0 18px 46px rgba(0,0,0,.28);backdrop-filter:blur(10px)}
+.panel h2{font-size:18px;margin:0 0 12px}.panelHead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.panelHead h2{margin:0}.headActionForm{margin:0}.clearBtn{border-color:rgba(251,113,133,.34);background:linear-gradient(135deg,rgba(251,113,133,.18),rgba(124,58,237,.22));color:#fecdd3;box-shadow:0 12px 28px rgba(251,113,133,.10)}.metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metric{min-width:0;border:1px solid var(--line);border-radius:8px;padding:12px;background:rgba(255,255,255,.06);text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center}.metric span{display:block;color:var(--muted);font-size:12px}.metric strong{display:block;margin-top:4px;font-size:18px;overflow-wrap:anywhere;word-break:break-word}.metric.good strong{color:var(--green)}.metric.bad strong{color:var(--red)}.metric.warn strong{color:var(--amber)}.linkMetric{grid-column:span 2}.metricLine{display:inline-flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;max-width:100%}.metricLine strong{min-width:0}.miniGo{border:1px solid rgba(34,211,238,.34);border-radius:999px;padding:7px 10px;background:rgba(34,211,238,.13);color:#a5f3fc;text-decoration:none;font-weight:850;white-space:nowrap}
+form{margin:0}.formgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.field{position:relative;display:block}.field span{display:flex;align-items:center;gap:7px;font-weight:650;margin-bottom:7px}.field span::after{content:"?";width:18px;height:18px;border-radius:50%;display:inline-grid;place-items:center;background:rgba(116,94,148,.24);border:1px solid rgba(169,126,255,.24);color:#c4b5fd;font-size:12px;font-weight:900}.field input{width:100%;border:1px solid var(--line);border-radius:8px;background:rgba(8,5,18,.72);padding:10px 11px;color:var(--text)}.field small{position:absolute;left:0;right:0;bottom:calc(100% + 8px);z-index:20;display:block;visibility:hidden;opacity:0;transform:translateY(6px);padding:10px 12px;border:1px solid rgba(169,126,255,.22);border-radius:8px;background:rgba(10,6,18,.97);box-shadow:0 18px 42px rgba(0,0,0,.42);color:#ddd6fe;transition:opacity .16s ease,transform .16s ease,visibility .16s ease;pointer-events:none}.field:hover small,.field:focus-within small{visibility:visible;opacity:1;transform:translateY(0)}
+.check{display:flex;gap:10px;align-items:center;margin-bottom:12px;font-weight:700}.check input{width:18px;height:18px}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;justify-content:center}.saveActions{justify-content:flex-end}.btn{border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 13px;font-weight:750;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.10);color:#f7f2ff}.btn.primary{background:var(--blue);color:#fff}.btn.good{background:var(--green);color:#07120a}.btn.bad{background:rgba(251,113,133,.18);color:#fecdd3}.btn.warn{background:rgba(245,158,11,.16);color:#fde68a;border:1px solid rgba(245,158,11,.34)}
+.notice{max-height:280px;overflow:auto;margin-top:16px;border-radius:8px;padding:12px;border:1px solid var(--line);background:rgba(255,255,255,.08);white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}.notice strong{display:block;margin-bottom:4px;font:700 14px/1.4 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.notice.ok{border-color:rgba(34,197,94,.46);background:rgba(34,197,94,.12)}.notice.bad{border-color:rgba(251,113,133,.46);background:rgba(251,113,133,.12)}.notice.warn{border-color:rgba(245,158,11,.46);background:rgba(245,158,11,.12)}
+.code{background:rgba(255,255,255,.06);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:12px;overflow:auto;overflow-wrap:anywhere;min-height:120px;white-space:pre-wrap;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.helperText{margin:0 0 12px;color:var(--muted)}.xrayApply{margin-top:14px;padding:16px;border:1px solid rgba(34,211,238,.42);border-radius:8px;background:linear-gradient(135deg,rgba(34,211,238,.16),rgba(124,58,237,.20),rgba(236,72,153,.11));box-shadow:0 18px 42px rgba(34,211,238,.10)}.xrayApply h3{margin:0 0 8px;font-size:16px;color:#a5f3fc}.scriptBox{width:100%;min-height:260px;resize:vertical;border:1px solid rgba(34,211,238,.28);border-radius:8px;background:rgba(255,255,255,.07);padding:12px;color:var(--text);font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre;overflow:auto}
+.brandPanel{display:grid;grid-template-columns:repeat(2,minmax(0,132px));gap:8px}.brandPanel .titleRow,.brandPanel .links{grid-column:1/-1}.brandPanel .appBanner{width:100%;min-width:0}.brandPanel .links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:0}.brandPanel .links a{width:100%;min-width:0}
+@media(max-width:820px){.grid,.formgrid,.metrics{grid-template-columns:1fr}.linkMetric{grid-column:span 1}.metricLine{align-items:center;justify-content:center}.miniGo{width:auto;justify-content:center;display:inline-flex}.hero{align-items:flex-start;flex-direction:column}.topActions{justify-content:flex-start;padding-top:0}.wrap{padding:14px}h1{font-size:24px}.appBanner{width:auto;max-width:100%;justify-content:center;min-height:36px;padding:8px 12px}.panelHead{align-items:stretch;flex-direction:column}.headActionForm .btn{width:100%}.actions .btn,.actions button{width:100%}}
+@media(max-width:820px){.brandPanel{grid-template-columns:repeat(2,minmax(0,1fr));width:100%}.brandPanel .appBanner{width:100%}}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <section class="hero">
+    <div class="brand">
+      <div class="brandPanel">
+        <div class="titleRow">
+          <h1 class="appBanner"><span>OpenWrt Remote Hub</span></h1>
+        </div>
+        <div class="links">
+          <a class="uiPill" href="https://t.me/kzolotarev95" target="_blank" rel="noopener noreferrer">Telegram</a>
+          <a class="uiPill" href="https://github.com/kzolotarev95" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </div>
+      </div>
+    </div>
+    <div class="topActions">
+      <div class="vpnCard">
+          <a class="uiPill nethaven" href="https://t.me/+LZDsQJhUfcNhYWEy" target="_blank" rel="noopener noreferrer">
+            <span class="nethavenDot"></span>
+            <span>NetHaven VPN</span>
+          </a>
+      </div>
+      <div class="returnCard">
+        <a class="uiPill backBtn" href="/cgi-bin/luci/admin/services">Вернуться в службы OpenWrt</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="grid">
+    <div class="panel">
+      <h2>Состояние</h2>
+      <div class="metrics">
+EOF
+	metric "Сервис procd" "$service_state" "$service_tone"
+	metric "Xray туннель" "$xray_state" "$xray_tone"
+	if [ -n "$hub_url" ]; then
+		metric_link "Hub URL" "$hub_url" "$hub_url"
+	else
+		metric "Hub URL" "не задан" "linkMetric"
+	fi
+	cat <<EOF
+      </div>
+      <form method="post" class="actions">
+        <input type="hidden" name="key" value="$(h "$key")">
+        <button class="btn" name="action" value="start">Запустить</button>
+        <button class="btn" name="action" value="restart">Перезапустить</button>
+        <button class="btn" name="action" value="stop">Остановить</button>
+        <button class="btn" name="action" value="heartbeat">Heartbeat</button>
+        <button class="btn" name="action" value="doctor">Проверка</button>
+        <button class="btn" name="action" value="install_xray_tmp">Поставить Xray в /tmp</button>
+        <a class="btn" href="?key=$(h "$key")&action=download_config">Скачать Xray config</a>
+        <button class="btn" name="action" value="show_xray_settings">Xray настройки</button>
+      </form>
+EOF
+	if [ -n "$RESULT_TITLE" ]; then
+		printf '<div class="notice %s"><strong>%s</strong>\n%s</div>' "$(h "$RESULT_KIND")" "$(h "$RESULT_TITLE")" "$(h "$RESULT_BODY")"
+	fi
+	if [ "$SHOW_XRAY_SETTINGS" = "1" ]; then
+		cat <<EOF
+      <div class="xrayApply">
+        <h3>Xray настройки</h3>
+        <p class="helperText">Вставь сюда блок команд из OpenWrt config на VPS. Роутер сам применит UCI, пересоберет Xray config, включит сервис и отправит heartbeat.</p>
+        <form method="post">
+          <input type="hidden" name="key" value="$(h "$key")">
+          <textarea class="scriptBox" name="xray_settings_script" spellcheck="false" placeholder="uci -q delete owrtremote.main
+uci set owrtremote.main=remote
+uci set owrtremote.main.enabled='1'
+...
+owrt-remote heartbeat"></textarea>
+          <div class="actions">
+            <button class="btn good" name="action" value="apply_xray_settings">Применить настройки</button>
+            <button class="btn" name="action" value="show_xray_settings">Очистить поле</button>
+          </div>
+        </form>
+      </div>
+EOF
+	fi
+	cat <<EOF
+    </div>
+  </section>
+
+  <section class="panel" style="margin-top:16px">
+    <div class="panelHead">
+      <h2>Настройки роутера</h2>
+      <form method="post" class="headActionForm">
+        <input type="hidden" name="key" value="$(h "$key")">
+        <button class="btn clearBtn" name="action" value="clear_config">Очистить Конфигурацию</button>
+      </form>
+    </div>
+    <form method="post">
+      <input type="hidden" name="key" value="$(h "$key")">
+      <label class="check"><input type="checkbox" name="enabled" value="1" $enabled_checked> Включить агент и автозапуск</label>
+      <div class="formgrid">
+EOF
+	field router_id "Router ID" text "Уникальное имя этого роутера в VPS-панели. Бери из карточки роутера на VPS: main, office-1, shop-2."
+	field router_name "Название" text "Красивое имя для карточки на VPS. Можно писать по-русски: Главный роутер, Дом, Офис."
+	field role "Роль" text "main ставь для главного роутера. node ставь для дополнительных роутеров, которые просто цепляешь и мониторишь."
+	field public_url "Public URL" text "Обычно оставь пустым. Нужно только если у роутера уже есть своя готовая публичная ссылка."
+	field hub_url "Hub URL" text "Адрес веб-панели на VPS, куда роутер отправляет online/offline. Бери из VPS, например http://VPS_IP:8088."
+	field hub_token "Hub token" password "Секрет AGENT_TOKEN из VPS-хаба. Его показывает команда init/serve на VPS; нужен для heartbeat."
+	field heartbeat_interval "Heartbeat, секунд" number "Как часто роутер сообщает VPS, что он online. Обычно 30 секунд, меньше 10 не ставь."
+	field xray_bin "Xray binary" text "Путь к Xray на роутере. Если ставил пакет xray-core, обычно оставь /usr/bin/xray."
+	field xray_config "Xray config" text "Куда агент сохранит клиентский Xray-конфиг. Обычно оставь /etc/xray/owrt-remote-client.json."
+	field vps_host "VPS host" text "IP или домен VPS, куда Xray роутера подключается reverse-туннелем. Бери IP/домен своего VPS."
+	field vps_port "VPS Xray port" number "Порт Xray на VPS для reverse-туннеля. Должен совпадать с render-xray на VPS, обычно 8443."
+	field vless_uuid "VLESS UUID" text "Уникальный UUID роутера. Бери из карточки роутера на VPS или из команды print-openwrt-config."
+	field vless_encryption "VLESS encryption" text "Для этой схемы оставь none. Меняй только если сам меняешь Xray-конфиг на VPS."
+	field vless_flow "VLESS flow" text "Обычно оставь пустым. Нужно только для специальных режимов Xray."
+	field reverse_tag "Reverse tag" text "Метка reverse-туннеля внутри Xray. Обычно оставь reverse-in, если на VPS не задавал другое."
+	field ssh_vless_uuid "SSH VLESS UUID" text "UUID отдельного SSH reverse-туннеля. Бери из OpenWrt config на VPS для этого роутера."
+	field ssh_reverse_tag "SSH reverse tag" text "Метка reverse-туннеля для SSH. Обычно reverse-in-ssh."
+	field admin_host "Admin host" text "Куда внутри роутера вести админку LuCI. Обычно 127.0.0.1, потому что uhttpd слушает локально."
+	field admin_port "Admin port" number "Порт LuCI/uhttpd внутри роутера. Обычно 80; если LuCI на другом порту, укажи его."
+	field ssh_host "SSH host" text "Куда внутри роутера вести SSH. Обычно 127.0.0.1."
+	field ssh_port "SSH port" number "Порт Dropbear/SSH внутри роутера. Обычно 22."
+	cat <<EOF
+      </div>
+      <div class="actions saveActions">
+        <button class="btn primary" name="action" value="save">Сохранить</button>
+        <button class="btn good" name="action" value="save_start">Сохранить и запустить</button>
+      </div>
+    </form>
+  </section>
+</main>
+</body>
+</html>
+EOF
+}
+
+read_request
+
+if ! authorized; then
+	render_unauthorized
+	exit 0
+fi
+
+action="$(param action)"
+
+if [ "$action" = "download_config" ]; then
+	http_json
+	"$AGENT" render-client --stdout 2>&1
+	exit 0
+fi
+
+if [ "${REQUEST_METHOD:-GET}" = "POST" ]; then
+	case "$action" in
+		save)
+			save_config
+			;;
+		save_start)
+			save_config
+			run_action start
+			;;
+		show_xray_settings)
+			SHOW_XRAY_SETTINGS="1"
+			;;
+		apply_xray_settings)
+			apply_xray_settings
+			;;
+		clear_config)
+			clear_config
+			;;
+		start|stop|restart|heartbeat|doctor|install_xray_tmp)
+			run_action "$action"
+			;;
+	esac
+fi
+
+render_page
