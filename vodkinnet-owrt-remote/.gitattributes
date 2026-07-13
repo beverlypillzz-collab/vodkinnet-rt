@@ -1,0 +1,17 @@
+* text=auto
+
+*.md text eol=lf
+*.txt text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf
+LICENSE text eol=lf
+Makefile text eol=lf
+install.sh text eol=lf
+uninstall.sh text eol=lf
+files/usr/sbin/owrt-full-backup text eol=lf
+files/usr/sbin/owrt-full-backup-upload text eol=lf
+files/etc/config/fullbackup text eol=lf
+files/www/cgi-bin/owrt-full-backup text eol=lf
+files/usr/share/luci/menu.d/luci-app-owrt-full-backup.json text eol=lf
+files/usr/share/rpcd/acl.d/luci-app-owrt-full-backup.json text eol=lf
+files/www/luci-static/resources/view/owrt_full_backup.js text eol=lf
