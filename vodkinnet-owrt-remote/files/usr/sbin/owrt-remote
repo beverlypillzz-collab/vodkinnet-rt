@@ -68,7 +68,11 @@ lan_ip_default() {
 }
 
 json_escape() {
-	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g'
+	# VodkinNET: strip CR (Windows-terminal copy-paste artifact that broke
+	# Xray's JSON parser - "invalid character '\r' in string literal") before
+	# escaping, so a stray \r in any UCI value can never break the generated
+	# JSON again.
+	printf '%s' "$1" | tr -d '\r' | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g'
 }
 
 json_string() {
@@ -270,20 +274,58 @@ xray_bin_path() {
 	printf '%s' "$configured"
 }
 
+# VodkinNET: same Fastly-IP-pool issue as install.sh's fetch() - a specific
+# edge IP for release-assets.githubusercontent.com timed out for 5 minutes
+# straight tonight while downloading Xray, with no automatic fallback. This
+# mirrors the fix in install.sh so router-side Xray installs are equally
+# resilient, not just the initial file fetch during setup.
+_fastly_hosts() {
+	case "$1" in
+		raw.githubusercontent.com|release-assets.githubusercontent.com|objects.githubusercontent.com|github-cloud.githubusercontent.com) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+_pin_fastly_ip() {
+	local host hosts_file ip tmp
+	host="$1"
+	_fastly_hosts "$host" || return 1
+	hosts_file="/etc/hosts"
+	for ip in 185.199.108.133 185.199.109.133 185.199.110.133 185.199.111.133; do
+		tmp="/tmp/.owrt-remote-hosts-probe.$$"
+		if [ -f "$hosts_file" ]; then
+			grep -v " $host\$" "$hosts_file" >"$tmp" 2>/dev/null || true
+		else
+			: >"$tmp"
+		fi
+		printf '%s %s\n' "$ip" "$host" >>"$tmp"
+		cp "$tmp" "$hosts_file"
+		rm -f "$tmp"
+		if command -v curl >/dev/null 2>&1; then
+			curl -fsS --connect-timeout 6 -o /dev/null "https://$host/" && return 0
+		elif command -v wget >/dev/null 2>&1; then
+			wget -T 6 -q -O /dev/null "https://$host/" && return 0
+		fi
+	done
+	return 1
+}
+
 fetch_file() {
 	local url dst
 	url="$1"
 	dst="$2"
 	if command -v wget >/dev/null 2>&1; then
-		wget -q -O "$dst" "$url"
-		return
-	fi
-	if command -v curl >/dev/null 2>&1; then
+		wget -O "$dst" "$url"
+	elif command -v curl >/dev/null 2>&1; then
 		curl -fsSL "$url" -o "$dst"
-		return
+	else
+		die "для удаленной установки нужен wget или curl"
 	fi
-	die "для скачивания нужен wget или curl"
 }
+# NOTE: fetch_file() above is intentionally overridden further down in this
+# file ("Override Xray bootstrap with boot-safe retry logic") - shell keeps
+# only the last function definition, so that later one is what actually runs.
+# Kept here only as a fallback shape for readability; do not rely on this copy.
 
 xray_arch() {
 	local arch
@@ -733,20 +775,40 @@ doctor() {
 
 # Override Xray bootstrap with boot-safe retry logic.
 fetch_file() {
-	local url dst
+	local url dst host
 	url="$1"
 	dst="$2"
 	rm -f "$dst"
-	if command -v curl >/dev/null 2>&1 && curl -fsSL "$url" -o "$dst"; then
+	if _fetch_file_attempt "$url" "$dst"; then
 		return 0
 	fi
-	if command -v uclient-fetch >/dev/null 2>&1 && uclient-fetch -q -O "$dst" "$url"; then
-		return 0
-	fi
-	if command -v wget >/dev/null 2>&1 && wget -q -O "$dst" "$url"; then
+	# VodkinNET: this is the fetch_file() that actually runs (it shadows the
+	# earlier same-named function - shell just uses the last definition).
+	# It had no timeout and no fallback, which is exactly what caused a
+	# 5-minute hang tonight downloading Xray from release-assets.
+	# githubusercontent.com when the resolver handed us a blocked Fastly edge
+	# IP. Try pinning a known-working IP before giving up.
+	host="$(printf '%s' "$url" | sed -n 's#^https\?://\([^/]*\)/.*#\1#p')"
+	if _pin_fastly_ip "$host" && _fetch_file_attempt "$url" "$dst"; then
 		return 0
 	fi
 	rm -f "$dst"
+	return 1
+}
+
+_fetch_file_attempt() {
+	local url dst
+	url="$1"
+	dst="$2"
+	if command -v curl >/dev/null 2>&1 && curl -fsSL --connect-timeout 15 "$url" -o "$dst"; then
+		return 0
+	fi
+	if command -v uclient-fetch >/dev/null 2>&1 && uclient-fetch -T 15 -q -O "$dst" "$url"; then
+		return 0
+	fi
+	if command -v wget >/dev/null 2>&1 && wget -T 15 -q -O "$dst" "$url"; then
+		return 0
+	fi
 	return 1
 }
 

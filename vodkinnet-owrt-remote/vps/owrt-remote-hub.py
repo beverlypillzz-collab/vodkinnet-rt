@@ -1481,7 +1481,15 @@ def make_openwrt_config(row, hub_url):
         f"uci set owrtremote.main.hub_url='{sh_quote(hub_url)}'",
         f"uci set owrtremote.main.hub_token='{sh_quote(agent_token())}'",
         "uci set owrtremote.main.heartbeat_interval='30'",
-        "uci set owrtremote.main.xray_bin='/usr/bin/xray'",
+        # VodkinNET: don't hardcode a static xray_bin path here - install.sh
+        # already detects where it actually installed Xray (/tmp/owrt-xray on
+        # most routers), but the "uci -q delete owrtremote.main" above wipes
+        # that value. A hardcoded '/usr/bin/xray' silently pointed at a path
+        # that doesn't exist and caused a multi-hour debugging session.
+        # Auto-detect at apply-time instead, so it's always correct regardless
+        # of section resets or where a given router happens to keep it.
+        "XRAY_BIN=\"$(command -v xray 2>/dev/null || ls /tmp/owrt-xray/xray /usr/bin/xray /usr/sbin/xray 2>/dev/null | head -n1)\"",
+        "uci set owrtremote.main.xray_bin=\"$XRAY_BIN\"",
         "uci set owrtremote.main.xray_config='/etc/xray/owrt-remote-client.json'",
         f"uci set owrtremote.main.vps_host='{sh_quote(row['vps_host'])}'",
         f"uci set owrtremote.main.vps_port='{int(row['vless_port'])}'",
@@ -1492,11 +1500,25 @@ def make_openwrt_config(row, hub_url):
         f"uci set owrtremote.main.reverse_tag='{sh_quote(row['reverse_tag'])}'",
         f"uci set owrtremote.main.ssh_vless_uuid='{sh_quote(row['ssh_vless_uuid'])}'",
         f"uci set owrtremote.main.ssh_reverse_tag='{sh_quote(row['ssh_reverse_tag'] or (row['reverse_tag'] + '-ssh'))}'",
-        f"uci set owrtremote.main.admin_host='{sh_quote(row['admin_host'])}'",
-        f"uci set owrtremote.main.admin_port='{int(row['admin_port'])}'",
-        f"uci set owrtremote.main.ssh_host='{sh_quote(row['ssh_host'] or '127.0.0.1')}'",
-        f"uci set owrtremote.main.ssh_port='{int(row['ssh_port'] or 22)}'",
-        f"uci set owrtremote.main.public_url='{sh_quote(row['public_url'])}'",
+    ]
+    # VodkinNET: only pin admin_host/ssh_host when the panel record was
+    # explicitly customized away from the DB default. Otherwise, DON'T emit
+    # these lines at all - the agent's own uci_get(..., lan_ip_default())
+    # fallback (files/usr/sbin/owrt-remote) then computes the right value
+    # itself at render-client time. This works correctly whether uhttpd/
+    # dropbear listen on 0.0.0.0 (loopback works fine too) or are bound to
+    # the LAN interface only (loopback would silently fail there) - one
+    # single config line no longer needs a human to run netstat and guess.
+    admin_host = (row["admin_host"] or "").strip()
+    if admin_host and admin_host != "127.0.0.1":
+        lines.append(f"uci set owrtremote.main.admin_host='{sh_quote(admin_host)}'")
+    lines.append(f"uci set owrtremote.main.admin_port='{int(row['admin_port'])}'")
+    ssh_host = (row["ssh_host"] or "").strip()
+    if ssh_host and ssh_host != "127.0.0.1":
+        lines.append(f"uci set owrtremote.main.ssh_host='{sh_quote(ssh_host)}'")
+    lines.append(f"uci set owrtremote.main.ssh_port='{int(row['ssh_port'] or 22)}'")
+    lines.append(f"uci set owrtremote.main.public_url='{sh_quote(row['public_url'])}'")
+    lines += [
         "uci commit owrtremote",
         "owrt-remote render-client",
         "/etc/init.d/owrt-remote enable",

@@ -21,14 +21,78 @@ target_path() {
 	printf '%s/%s' "${ROOT%/}" "$1"
 }
 
+# VodkinNET: raw.githubusercontent.com / release-assets.githubusercontent.com
+# are served from a small pool of Fastly edge IPs. Individual addresses in
+# this pool are sometimes unreachable from a given network (observed live:
+# 185.199.110.133 timed out for 5+ minutes while .108.133 worked instantly),
+# and neither wget nor curl retry across DNS answers on their own - they just
+# hang on whichever address the resolver handed them. This cost real
+# debugging time. _fastly_ips lists the fallback pool; _pin_fastly_ip tries
+# each one via a temporary /etc/hosts entry (works for both busybox wget and
+# curl, unlike curl-only --resolve) and keeps the first one that answers, so
+# every subsequent fetch in this run (and the agent's own Xray download)
+# benefits automatically too.
+_fastly_hosts() {
+	case "$1" in
+		raw.githubusercontent.com|release-assets.githubusercontent.com|objects.githubusercontent.com|github-cloud.githubusercontent.com) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+_fastly_ips="185.199.108.133 185.199.109.133 185.199.110.133 185.199.111.133"
+
+_host_of() {
+	printf '%s' "$1" | sed -n 's#^https\?://\([^/]*\)/.*#\1#p'
+}
+
+_pin_fastly_ip() {
+	local host hosts_file ip tmp
+	host="$1"
+	_fastly_hosts "$host" || return 1
+	hosts_file="$(target_path etc/hosts)"
+	for ip in $_fastly_ips; do
+		info "Пробую $host через $ip..."
+		tmp="$(target_path tmp/.owrt-hosts-probe.$$)"
+		if [ -f "$hosts_file" ]; then
+			grep -v " $host\$" "$hosts_file" >"$tmp" 2>/dev/null || true
+		else
+			: >"$tmp"
+		fi
+		printf '%s %s\n' "$ip" "$host" >>"$tmp"
+		cp "$tmp" "$hosts_file"
+		rm -f "$tmp"
+		if command -v curl >/dev/null 2>&1; then
+			curl -fsS --connect-timeout 6 -o /dev/null "https://$host/" && { info "Зафиксировал $host -> $ip"; return 0; }
+		elif command -v wget >/dev/null 2>&1; then
+			wget -T 6 -q -O /dev/null "https://$host/" && { info "Зафиксировал $host -> $ip"; return 0; }
+		fi
+	done
+	return 1
+}
+
 fetch() {
+	local src dst host
+	src="$1"
+	dst="$2"
+	if _fetch_once "$src" "$dst"; then
+		return 0
+	fi
+	host="$(_host_of "$src")"
+	info "Не удалось скачать с первой попытки ($host), проверяю известные IP CDN..."
+	if _pin_fastly_ip "$host"; then
+		_fetch_once "$src" "$dst" && return 0
+	fi
+	die "не удалось скачать $src (ни обычным DNS, ни через известные IP)"
+}
+
+_fetch_once() {
 	local src dst
 	src="$1"
 	dst="$2"
 	if command -v wget >/dev/null 2>&1; then
-		wget -O "$dst" "$src"
+		wget -T 15 -O "$dst" "$src"
 	elif command -v curl >/dev/null 2>&1; then
-		curl -fsSL "$src" -o "$dst"
+		curl -fsSL --connect-timeout 15 "$src" -o "$dst"
 	else
 		die "для удаленной установки нужен wget или curl"
 	fi
