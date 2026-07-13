@@ -324,13 +324,7 @@ flowchart LR
 
 <h2> Видео-демо</h2>
 
-<b>Видео дизайн обзор</b>
-<br>
-<sub>Открытие Hub с телефона: статус роутера, LuCI и SSH Web Terminal.</sub>
-
-<br><br>
-
-<video src="REMOVED" width="360" controls></video>
+<sub>Отдельного демо-видео для VodkinNET-версии пока нет — смотри статичные скриншоты выше.</sub>
 
 </div>
 
