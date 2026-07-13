@@ -1485,6 +1485,7 @@ def make_openwrt_config(row, hub_url):
         "uci set owrtremote.main.xray_config='/etc/xray/owrt-remote-client.json'",
         f"uci set owrtremote.main.vps_host='{sh_quote(row['vps_host'])}'",
         f"uci set owrtremote.main.vps_port='{int(row['vless_port'])}'",
+        f"uci set owrtremote.main.tls_sni='{sh_quote(row['vps_host'])}'",
         f"uci set owrtremote.main.vless_uuid='{sh_quote(row['vless_uuid'])}'",
         f"uci set owrtremote.main.vless_encryption='{sh_quote(row['vless_encryption'])}'",
         f"uci set owrtremote.main.vless_flow='{sh_quote(row['vless_flow'])}'",

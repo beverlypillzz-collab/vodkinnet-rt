@@ -164,6 +164,31 @@ fi
 
 install_xray_runtime
 
+# VodkinNET: fleet standard — management daemons are bound to the 'lan'
+# interface only (not loopback), as part of the "manage from one admin IP
+# only" hardening pattern applied across the whole router fleet. Under that
+# setup uhttpd's forced HTTP->HTTPS redirect breaks the tunnel's plain-TCP
+# forward to LuCI (redirect_https returns a 307 the tunnel can't follow).
+# The LuCI session is still protected end-to-end by the reverse channel's own
+# TLS (VPS<->router), so disabling this LOCAL redirect is safe here and is
+# the expected setup for every VodkinNET router. Skip with
+# OWRT_REMOTE_KEEP_HTTPS_REDIRECT=1 if you don't want this behavior.
+if [ "${OWRT_REMOTE_KEEP_HTTPS_REDIRECT:-0}" != "1" ]; then
+	if uci -q get uhttpd.main >/dev/null 2>&1; then
+		current_redirect="$(uci -q get uhttpd.main.redirect_https 2>/dev/null || true)"
+		if [ "$current_redirect" != "0" ]; then
+			uci set uhttpd.main.redirect_https='0'
+			uci commit uhttpd
+			if [ -x "$(target_path etc/init.d/uhttpd)" ]; then
+				"$(target_path etc/init.d/uhttpd)" restart >/dev/null 2>&1 || true
+			fi
+			info "uhttpd.main.redirect_https отключён (fleet-стандарт для reverse-туннеля)."
+			info "  LuCI-сессия защищена TLS reverse-канала (VPS<->роутер), локальный редирект был лишним и ломал туннель."
+			info "  Отключить это поведение установщика: OWRT_REMOTE_KEEP_HTTPS_REDIRECT=1"
+		fi
+	fi
+fi
+
 key="$(make_key)"
 ip="$(router_ip)"
 ui_version="$(installed_ui_version)"

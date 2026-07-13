@@ -49,6 +49,24 @@ truthy() {
 	esac
 }
 
+# VodkinNET: fleet standard is to bind management daemons (dropbear, uhttpd)
+# to the 'lan' interface address, not to loopback/0.0.0.0, as part of the
+# "manage from one admin IP only" hardening pattern applied to every router.
+# On such routers 127.0.0.1 refuses admin/SSH connections, so the sane
+# default for admin_host/ssh_host is the router's own LAN address, not
+# loopback. Falls back to 127.0.0.1 if the LAN address can't be read (e.g.
+# non-standard network layout) — explicit admin_host/ssh_host in UCI always
+# wins over this default either way.
+lan_ip_default() {
+	local ip
+	ip="$(uci -q get network.lan.ipaddr 2>/dev/null || true)"
+	if [ -n "$ip" ]; then
+		printf '%s' "$ip"
+	else
+		printf '127.0.0.1'
+	fi
+}
+
 json_escape() {
 	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g'
 }
@@ -419,9 +437,9 @@ render_client_config() {
 	flow="$(uci_get vless_flow '')"
 	reverse_tag="$(safe_id "$(uci_get reverse_tag reverse-in)")"
 	ssh_reverse_tag="$(safe_id "$(uci_get ssh_reverse_tag "${reverse_tag}-ssh")")"
-	admin_host="$(uci_get admin_host 127.0.0.1)"
+	admin_host="$(uci_get admin_host "$(lan_ip_default)")"
 	admin_port="$(safe_num "$(uci_get admin_port 80)" 80)"
-	ssh_host="$(uci_get ssh_host 127.0.0.1)"
+	ssh_host="$(uci_get ssh_host "$(lan_ip_default)")"
 	ssh_port="$(safe_num "$(uci_get ssh_port 22)" 22)"
 	xray_config="$(uci_get xray_config /etc/xray/owrt-remote-client.json)"
 	# VodkinNET: TLS on the reverse channel. Set option tls_sni to the hub
@@ -587,9 +605,9 @@ heartbeat_json() {
   "release": $(json_string "$(release_text)"),
   "hostname": $(json_string "$(hostname 2>/dev/null || printf openwrt)"),
   "public_url": $(json_string "$public_url"),
-  "admin_host": $(json_string "$(uci_get admin_host 127.0.0.1)"),
+  "admin_host": $(json_string "$(uci_get admin_host "$(lan_ip_default)")"),
   "admin_port": $(safe_num "$(uci_get admin_port 80)" 80),
-  "ssh_host": $(json_string "$(uci_get ssh_host 127.0.0.1)"),
+  "ssh_host": $(json_string "$(uci_get ssh_host "$(lan_ip_default)")"),
   "ssh_port": $(safe_num "$(uci_get ssh_port 22)" 22),
   "hub_url": $(json_string "$hub_url"),
   "uptime": $(safe_num "$(uptime_seconds)" 0),

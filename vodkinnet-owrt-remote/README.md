@@ -124,6 +124,23 @@ OWRT_REMOTE_BRAND_URL=https://example.com OWRT_REMOTE_BRAND_NAME="MyBrand"
 ```
 Без этих переменных бейдж просто не показывается.
 
+### VodkinNET fleet-стандарт: management-демоны на LAN-интерфейсе
+
+На всём флоте VodkinNET dropbear и uhttpd намеренно привязаны к интерфейсу
+`lan` (не к `0.0.0.0`/loopback) — часть стандартной защиты "управление только
+с одного admin IP". Это ломает reverse-туннель по умолчанию (127.0.0.1
+недоступен), поэтому:
+
+- **Агент** (`files/usr/sbin/owrt-remote`) при пустом `admin_host`/`ssh_host`
+  в UCI сам берёт `network.lan.ipaddr` вместо жёсткого `127.0.0.1`. Явное
+  значение в UCI всегда приоритетнее.
+- **Установщик** (`install.sh`) автоматически ставит
+  `uhttpd.main.redirect_https='0'` — форс-редикт LuCI на HTTPS ломает
+  туннельный `freedom`-proxy (получает `307` вместо HTML). Сессия LuCI
+  всё равно защищена TLS самого reverse-канала (VPS↔роутер), локальный
+  редирект для этого пути избыточен. Отключить это поведение установщика:
+  `OWRT_REMOTE_KEEP_HTTPS_REDIRECT=1 sh install.sh`.
+
 ---
 
 <div align="center">
