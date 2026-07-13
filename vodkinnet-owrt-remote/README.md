@@ -35,7 +35,7 @@
 <h2> Что это такое</h2>
 
 <p>
-<b>OpenWrt Remote Hub</b> — это связка из VPS-панели и OpenWrt-агента, которая даёт удобный удалённый доступ к роутерам без проброса LuCI и SSH наружу.<br>
+<b>VodkinNET RT Hub</b> — это связка из VPS-панели и OpenWrt-агента, которая даёт удобный удалённый доступ к роутерам без проброса LuCI и SSH наружу.<br>
 Роутер сам подключается к VPS изнутри сети, а ты заходишь в Hub-панель и открываешь нужный роутер, LuCI или SSH Web Terminal.
 </p>
 
@@ -157,42 +157,13 @@ OWRT_REMOTE_BRAND_URL=https://example.com OWRT_REMOTE_BRAND_NAME="MyBrand"
 
 ---
 
-<div align="center">
-
-<h2> Сообщество NetHaven VPN Обсуждение </h2>
-
-Есть вопросы, идеи или нужна помощь с настройкой?
-
-Присоединяйтесь к чату пользователей **OpenWrt Remote Hub**, где можно:
-
- задать вопрос по установке  
- обсудить настройку VPS и OpenWrt  
- сообщить об ошибке  
- предложить новые функции  
- поделиться своим опытом использования
-
-<br>
-
-<a href="https://t.me/+LZDsQJhUfcNhYWEy">
-  <img alt="Telegram Community"
-       src="https://img.shields.io/badge/Telegram-Community-229ED9?style=for-the-badge&logo=telegram&logoColor=white">
-</a>
-
-<br><br>
-
-<b> Чат и обсуждения проекта</b>
-
-</div>
-
----
-
 <h2> Быстрый старт</h2>
 
 После установки в конце появится вход:
 
 ```text
 login:    admin
-password: admin
+password: <сгенерированный при установке, см. вывод инсталлятора>
 ```
 
 Пароль лучше поменять сразу после первого входа.
@@ -200,7 +171,7 @@ password: admin
 <h3> VPS: поставить Hub, Xray, firewall и HTTPS одной командой</h3>
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/main/vps/install-vps.sh?v=$(date +%s)" | sudo sh
+curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/install-vps.sh?v=$(date +%s)" | sudo sh
 ```
 
 Установщик спросит:
@@ -220,7 +191,7 @@ hub.example.com
 <h3> OpenWrt: поставить Remote Hub на роутер</h3>
 
 ```sh
-wget -O - "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/main/install.sh?v=$(date +%s)" | sh
+wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/install.sh?v=$(date +%s)" | sh
 ```
 
 Проверка на роутере:
@@ -243,7 +214,7 @@ owrt-remote status
 ```mermaid
 flowchart LR
     U[User Browser] -->|HTTPS 443| N[nginx on VPS]
-    N --> H[OpenWrt Remote Hub]
+    N --> H[VodkinNET RT Hub]
     H --> X[Xray Reverse]
     X --> R[OpenWrt Router]
     R --> L[LuCI]
@@ -341,7 +312,7 @@ flowchart LR
 
 <a href="https://youtu.be/BCVIQgHkbYA?si=BDRAt2uyqRwz8A2Y" target="_blank">
   <img src="https://img.youtube.com/vi/BCVIQgHkbYA/maxresdefault.jpg"
-       alt="OpenWrt Remote Hub Demo"
+       alt="VodkinNET RT Hub Demo"
        width="720">
 </a>
 
@@ -437,7 +408,7 @@ flowchart LR
 </div>
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/main/vps/install-vps.sh?v=$(date +%s)" | sudo env RESET_LOGIN=0 sh
+curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/install-vps.sh?v=$(date +%s)" | sudo env RESET_LOGIN=0 sh
 ```
 
 <div align="center">
@@ -447,7 +418,7 @@ curl -fsSL "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/
 </div>
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/main/vps/enable-https.sh?v=$(date +%s)" | sudo sh -s -- YOUR_VPS_IP
+curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/enable-https.sh?v=$(date +%s)" | sudo sh -s -- YOUR_VPS_IP
 ```
 
 </details>
@@ -493,7 +464,7 @@ Hub работает внутри на <code>80</code> и <code>8088</code>, а 
 </div>
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/main/vps/enable-https.sh?v=$(date +%s)" | sudo sh -s -- YOUR_VPS_IP
+curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/enable-https.sh?v=$(date +%s)" | sudo sh -s -- YOUR_VPS_IP
 ```
 
 <div align="center">
@@ -503,7 +474,7 @@ curl -fsSL "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/
 </div>
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/main/vps/enable-https.sh?v=$(date +%s)" | sudo EMAIL="you@example.com" sh -s -- hub.example.com
+curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/enable-https.sh?v=$(date +%s)" | sudo EMAIL="you@example.com" sh -s -- hub.example.com
 ```
 
 <div align="center">
@@ -730,7 +701,7 @@ sudo ss -lntp | grep -E ':(80|443|8088)'
 <summary align="center"><b> Удалить Hub с VPS полностью</b></summary>
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/main/vps/uninstall-vps.sh?v=$(date +%s)" | sudo sh
+curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/uninstall-vps.sh?v=$(date +%s)" | sudo sh
 ```
 
 <div align="center">
@@ -754,7 +725,7 @@ nginx-конфиг HTTPS, certbot renewal hook и старые TLS override-фа
 </div>
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/main/vps/uninstall-vps.sh?v=$(date +%s)" | sudo env PURGE=0 sh
+curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/uninstall-vps.sh?v=$(date +%s)" | sudo env PURGE=0 sh
 ```
 
 <div align="center">
@@ -764,7 +735,7 @@ curl -fsSL "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/
 </div>
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/main/vps/uninstall-vps.sh?v=$(date +%s)" | sudo env REMOVE_XRAY=1 sh
+curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/uninstall-vps.sh?v=$(date +%s)" | sudo env REMOVE_XRAY=1 sh
 ```
 
 </details>
@@ -773,7 +744,7 @@ curl -fsSL "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/
 <summary align="center"><b> Удалить агент с OpenWrt полностью</b></summary>
 
 ```sh
-wget -O - "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/main/uninstall.sh?v=$(date +%s)" | PURGE=1 sh
+wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/uninstall.sh?v=$(date +%s)" | PURGE=1 sh
 ```
 
 <div align="center">
@@ -798,7 +769,7 @@ rpcd ACL<br>
 </div>
 
 ```sh
-wget -O - "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/main/uninstall.sh?v=$(date +%s)" | sh
+wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/uninstall.sh?v=$(date +%s)" | sh
 ```
 
 </details>
@@ -922,7 +893,7 @@ wget -O - "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/m
 
 <br>
 
-<b>OpenWrt Remote Hub</b> — свой VPS, свой доступ, свои роутеры под контролем.
+<b>VodkinNET RT Hub</b> — свой VPS, свой доступ, свои роутеры под контролем.
 
 <br><br>
 

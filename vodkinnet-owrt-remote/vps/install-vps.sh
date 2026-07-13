@@ -1,9 +1,9 @@
 #!/bin/sh
 set -u
 
-APP_NAME="OpenWrt Remote Hub"
+APP_NAME="VodkinNET RT Hub"
 INSTALLER_VERSION="2026-07-03-web-push-v1"
-RAW_BASE="${RAW_URL:-https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/main}"
+RAW_BASE="${RAW_URL:-https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote}"
 STATE_DIR="${OWRT_REMOTE_STATE_DIR:-/var/lib/owrt-remote}"
 HUB_LOGIN="${HUB_LOGIN:-admin}"
 # VodkinNET: never default the password to "admin". If unset, generate a strong
@@ -250,7 +250,7 @@ print_result() {
 	if [ "${HTTPS_OK:-0}" != "1" ]; then
 		info ""
 		info "Включить HTTPS вручную:"
-		info '  curl -fsSL "https://raw.githubusercontent.com/kzolotarev95/luci-app-owrt-remote/main/vps/enable-https.sh?v=$(date +%s)" | sudo sh -s -- '"$host"
+		info '  curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/enable-https.sh?v=$(date +%s)" | sudo sh -s -- '"$host"
 	fi
 	info "============================================================"
 }
