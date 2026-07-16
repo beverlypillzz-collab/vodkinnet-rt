@@ -214,6 +214,19 @@ hub.example.com
 <h3> OpenWrt: поставить Remote Hub на роутер</h3>
 
 ```sh
+wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/bootstrap.sh?v=$(date +%s)" | sh
+```
+
+`raw.githubusercontent.com` раздаётся с нескольких Fastly IP, и конкретный
+адрес иногда недоступен из отдельной сети по несколько минут — `install.sh`
+сам это переживает (ретрай по IP уже встроен), но саму **загрузку**
+`install.sh` так подстраховать нельзя: кода ещё нет на диске, ретраить
+нечем. `bootstrap.sh` — крошечная обёртка ровно для этого: сама находит
+рабочий IP через `/etc/hosts`, потом скачивает и запускает `install.sh`.
+
+Если сеть и так в порядке, можно обойтись без обёртки:
+
+```sh
 wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/install.sh?v=$(date +%s)" | sh
 ```
 
