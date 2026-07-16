@@ -214,21 +214,33 @@ hub.example.com
 <h3> OpenWrt: поставить Remote Hub на роутер</h3>
 
 ```sh
-wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/bootstrap.sh?v=$(date +%s)" | sh
+wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/install.sh?v=$(date +%s)" | sh
 ```
 
 `raw.githubusercontent.com` раздаётся с нескольких Fastly IP, и конкретный
-адрес иногда недоступен из отдельной сети по несколько минут — `install.sh`
-сам это переживает (ретрай по IP уже встроен), но саму **загрузку**
-`install.sh` так подстраховать нельзя: кода ещё нет на диске, ретраить
-нечем. `bootstrap.sh` — крошечная обёртка ровно для этого: сама находит
-рабочий IP через `/etc/hosts`, потом скачивает и запускает `install.sh`.
+адрес иногда недоступен из отдельной сети по несколько минут. `install.sh`
+сам переживает это для всего, что скачивает **после своего запуска**
+(ретрай по IP встроен) — но саму **первую** команду выше подстраховать
+нельзя в принципе: это `wget | sh`, то есть сначала скачивается **текст**
+скрипта, и только потом он выполняется. Если зависает уже скачивание
+текста — внутренней логике ещё нечего исполнять, она не успевает
+сработать. Это ограничение самого паттерна "curl/wget в sh одной командой",
+не баг конкретно этого скрипта.
 
-Если сеть и так в порядке, можно обойтись без обёртки:
+**Если команда выше висит** на `Connecting to 185.199.11X.133:443` дольше
+пары секунд — почини DNS вручную, командами без единого сетевого запроса
+(поэтому они не могут зависнуть так же):
 
 ```sh
-wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/install.sh?v=$(date +%s)" | sh
+for ip in 185.199.108.133 185.199.109.133 185.199.110.133 185.199.111.133; do
+	sed -i '/ raw\.githubusercontent\.com$/d' /etc/hosts
+	echo "$ip raw.githubusercontent.com" >> /etc/hosts
+	wget -q -T 5 -O /dev/null https://raw.githubusercontent.com/ 2>/dev/null && echo "рабочий IP: $ip" && break
+done
 ```
+
+После этого команда установки выше пройдёт нормально — DNS уже указывает
+на рабочий адрес.
 
 Проверка на роутере:
 
