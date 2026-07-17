@@ -1,7 +1,7 @@
 #!/bin/sh
 set -u
 
-APP_NAME="VodkinNET RT Hub"
+APP_NAME="VodkinNet RT Hub"
 RAW_BASE="${RAW_URL:-https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote}"
 STATE_DIR="${OWRT_REMOTE_STATE_DIR:-/var/lib/owrt-remote}"
 ACME_WEBROOT="$STATE_DIR/acme-webroot"

@@ -32,7 +32,7 @@ except Exception:
     webpush = None
 
 
-APP_NAME = "VodkinNET RT Hub"
+APP_NAME = "VodkinNet RT Hub"
 RAW_REPO_BASE = "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote"
 STATE_DIR = Path(os.environ.get("OWRT_REMOTE_STATE_DIR", "/var/lib/owrt-remote"))
 DB_PATH = Path(os.environ.get("OWRT_REMOTE_DB", str(STATE_DIR / "hub.db")))
@@ -763,9 +763,9 @@ self.addEventListener('push', event => {
   try {
     data = event.data ? event.data.json() : {};
   } catch (e) {
-    data = {title: 'VodkinNET RT Hub', body: event.data ? event.data.text() : ''};
+    data = {title: 'VodkinNet RT Hub', body: event.data ? event.data.text() : ''};
   }
-  const title = data.title || 'VodkinNET RT Hub';
+  const title = data.title || 'VodkinNet RT Hub';
   const options = {
     body: data.body || '',
     tag: data.tag || 'owrt-remote-hub',
@@ -800,7 +800,7 @@ self.addEventListener('notificationclick', event => {
 def web_manifest_json():
     return json.dumps(
         {
-            "name": "VodkinNET RT Hub",
+            "name": "VodkinNet RT Hub",
             "short_name": "Wrt Hub",
             "start_url": "/",
             "scope": "/",
@@ -942,7 +942,7 @@ def record_hub_start_event():
         add_notification(
             "hub_restart",
             "Hub перезапущен",
-            "Служба VodkinNET RT Hub снова запущена.",
+            "Служба VodkinNet RT Hub снова запущена.",
             "info",
             [],
             {"boot_id": boot_id},
@@ -952,7 +952,7 @@ def record_hub_start_event():
         add_notification(
             "hub_start",
             "Hub запущен",
-            "VodkinNET RT Hub стартовал первый раз на этом VPS.",
+            "VodkinNet RT Hub стартовал первый раз на этом VPS.",
             "info",
             [],
             {"boot_id": boot_id},
@@ -1022,12 +1022,12 @@ def init_db(conn):
             vless_flow text not null default '',
             reverse_tag text not null default 'reverse-in',
             public_url text not null default '',
-            admin_host text not null default '127.0.0.1',
+            admin_host text not null default '',
             admin_port integer not null default 80,
             ssh_entry_port integer not null default 0,
             ssh_vless_uuid text not null default '',
             ssh_reverse_tag text not null default '',
-            ssh_host text not null default '127.0.0.1',
+            ssh_host text not null default '',
             ssh_port integer not null default 22,
             created_at integer not null,
             updated_at integer not null,
@@ -1223,9 +1223,9 @@ def heartbeat(conn, payload):
                 "role": payload.get("role") or "node",
                 "entry_port": payload.get("entry_port") or 0,
                 "vps_host": payload.get("vps_host") or "",
-                "admin_host": payload.get("admin_host") or "127.0.0.1",
+                "admin_host": payload.get("admin_host") or "",
                 "admin_port": payload.get("admin_port") or 80,
-                "ssh_host": payload.get("ssh_host") or "127.0.0.1",
+                "ssh_host": payload.get("ssh_host") or "",
                 "ssh_port": payload.get("ssh_port") or 22,
             },
         )
@@ -1357,7 +1357,7 @@ def make_server_xray_config(rows, listen_host="0.0.0.0", listen_port=DEFAULT_VLE
         "inbounds": inbounds,
         "outbounds": [{"tag": "direct", "protocol": "freedom"}],
         "routing": {"rules": rules},
-        "remarks": "VodkinNET RT Hub server config",
+        "remarks": "VodkinNet RT Hub server config",
     }
 
 
@@ -2010,7 +2010,7 @@ function render(list) {{
       r.entry_port ? 'entry ' + r.entry_port : '',
       r.ssh_entry_port ? 'ssh ' + r.ssh_entry_port : '',
       r.reverse_tag || '',
-      (r.admin_host || '127.0.0.1') + ':' + (r.admin_port || 80)
+      (r.admin_host ? (r.admin_host + ':' + (r.admin_port || 80)) : 'admin: авто (LAN IP)')
     ].filter(Boolean).slice(0, 5);
     const tagHtml = tags.map(t => `<span class="tag">${{escapeHtml(t)}}</span>`).join('');
     const adminButton = online
@@ -2091,7 +2091,7 @@ render = function(list) {{
       r.entry_port ? 'entry ' + r.entry_port : '',
       r.ssh_entry_port ? 'ssh ' + r.ssh_entry_port : '',
       r.reverse_tag || '',
-      (r.admin_host || '127.0.0.1') + ':' + (r.admin_port || 80)
+      (r.admin_host ? (r.admin_host + ':' + (r.admin_port || 80)) : 'admin: авто (LAN IP)')
     ].filter(Boolean).slice(0, 5);
     const tagHtml = tags.map(t => `<span class="tag">${{escapeHtml(t)}}</span>`).join('');
     const adminButton = online
@@ -2546,7 +2546,7 @@ function showBrowserNotification(item) {{
   if (!item || !('Notification' in window) || Notification.permission !== 'granted') return;
   if (localStorage.getItem('owrtNotifyEnabled') !== '1') return;
   try {{
-    new Notification(item.title || 'VodkinNET RT Hub', {{
+    new Notification(item.title || 'VodkinNet RT Hub', {{
       body: item.body || '',
       tag: 'owrt-' + (item.id || item.kind || item.ts || Date.now()),
       renotify: false
@@ -3280,7 +3280,7 @@ def login_html(error=""):
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#ff6a00">
-<title>VodkinNET RT Hub</title>
+<title>VodkinNet RT Hub</title>
 <style>
 :root{{color-scheme:dark;--bg:#0a0603;--panel:rgba(19,14,32,.9);--text:#f7f2ff;--muted:#b9adc9;--line:rgba(169,126,255,.28);--blue:#ff6a00;--cyan:#ff9a3c;--red:#fb7185;--green:#22c55e;--grid:rgba(255,106,0,.13)}}
 *{{box-sizing:border-box}}

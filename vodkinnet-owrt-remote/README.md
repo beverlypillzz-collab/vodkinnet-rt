@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0a0603,45:e01e1e,100:ff6a00&height=210&section=header&text=VodkinNET%20RT%20Hub&fontSize=42&fontColor=fff2e8&animation=fadeIn&fontAlignY=36&desc=Remote%20LuCI%20%2B%20SSH%20access%20through%20your%20own%20VPS%2C%20TLS-encrypted&descAlignY=58&descSize=16" alt="VodkinNET RT Hub" width="100%" />
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0a0603,45:e01e1e,100:ff6a00&height=210&section=header&text=VodkinNet%20RT%20Hub&fontSize=42&fontColor=fff2e8&animation=fadeIn&fontAlignY=36&desc=Remote%20LuCI%20%2B%20SSH%20access%20through%20your%20own%20VPS%2C%20TLS-encrypted&descAlignY=58&descSize=16" alt="VodkinNet RT Hub" width="100%" />
 
 <p>
   <a href="#-быстрый-старт"><img alt="Quick start" src="https://img.shields.io/badge/QUICK%20START-ONE%20COMMAND-22C55E?style=for-the-badge&labelColor=0a0603"></a>
@@ -35,7 +35,7 @@
 <h2> Что это такое</h2>
 
 <p>
-<b>VodkinNET RT Hub</b> — это связка из VPS-панели и OpenWrt-агента, которая даёт удобный удалённый доступ к роутерам без проброса LuCI и SSH наружу.<br>
+<b>VodkinNet RT Hub</b> — это связка из VPS-панели и OpenWrt-агента, которая даёт удобный удалённый доступ к роутерам без проброса LuCI и SSH наружу.<br>
 Роутер сам подключается к VPS изнутри сети, а ты заходишь в Hub-панель и открываешь нужный роутер, LuCI или SSH Web Terminal.
 </p>
 
@@ -262,7 +262,7 @@ owrt-remote status
 ```mermaid
 flowchart LR
     U[User Browser] -->|HTTPS 443| N[nginx on VPS]
-    N --> H[VodkinNET RT Hub]
+    N --> H[VodkinNet RT Hub]
     H --> X[Xray Reverse]
     X --> R[OpenWrt Router]
     R --> L[LuCI]
@@ -287,7 +287,7 @@ flowchart LR
 <br><br>
 
 <img src="assets/vodkinnet-brand.jpg"
-     alt="VodkinNET RT Hub"
+     alt="VodkinNet RT Hub"
      width="720">
 
 <br><br>
@@ -840,11 +840,11 @@ wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/m
 
 <div align="center">
 
-<img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=20&duration=2800&pause=800&color=ff6a00&center=true&vCenter=true&width=760&lines=VodkinNET+RT+Hub;LuCI+%2B+SSH+through+your+own+VPS;No+direct+router+ports+exposed;Built+for+remote+router+control" alt="Typing SVG" />
+<img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=20&duration=2800&pause=800&color=ff6a00&center=true&vCenter=true&width=760&lines=VodkinNet+RT+Hub;LuCI+%2B+SSH+through+your+own+VPS;No+direct+router+ports+exposed;Built+for+remote+router+control" alt="Typing SVG" />
 
 <br>
 
-<b>VodkinNET RT Hub</b> — свой VPS, свой доступ, свои роутеры под контролем.
+<b>VodkinNet RT Hub</b> — свой VPS, свой доступ, свои роутеры под контролем.
 
 <br><br>
 

@@ -1,6 +1,6 @@
 {
 	"admin/services/owrt-remote": {
-		"title": "VodkinNET RT Hub",
+		"title": "VodkinNet RT Hub",
 		"order": 91,
 		"action": {
 			"type": "view",

@@ -370,7 +370,7 @@ form{margin:0}.formgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr
       <div class="vpnCard">
           <a class="uiPill brandLink" href="https://vodkin.net" target="_blank" rel="noopener noreferrer">
             <span class="brandDot"></span>
-            <span>VodkinNET</span>
+            <span>VodkinNet</span>
           </a>
       </div>
       <div class="returnCard">
