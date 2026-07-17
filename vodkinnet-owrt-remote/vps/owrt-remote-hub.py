@@ -1125,6 +1125,14 @@ def upsert_router(conn, values):
             return current[key]
         return default
 
+    def strip_cidr(value):
+        # VodkinNET: defense-in-depth against "10.0.0.1/27"-style values
+        # ending up in admin_host/ssh_host (observed live: network.lan.ipaddr
+        # on some routers returns the address WITH a CIDR suffix, and that
+        # can end up here via the Edit form or API too, not just the
+        # router-side agent fetch this was originally found and fixed in).
+        return value.split("/", 1)[0] if value else value
+
     def keep_int(key, default=0):
         value = values.get(key)
         if value not in (None, ""):
@@ -1150,12 +1158,12 @@ def upsert_router(conn, values):
         "vless_flow": keep_str("vless_flow", ""),
         "reverse_tag": reverse_tag,
         "public_url": keep_str("public_url", ""),
-        "admin_host": keep_str("admin_host", "127.0.0.1"),
+        "admin_host": strip_cidr(keep_str("admin_host", "")),
         "admin_port": keep_int("admin_port", 80),
         "ssh_entry_port": keep_int("ssh_entry_port", int(values.get("entry_port") or 0) + 1000 if values.get("entry_port") else 0),
         "ssh_vless_uuid": ssh_vless_uuid,
         "ssh_reverse_tag": ssh_reverse_tag,
-        "ssh_host": keep_str("ssh_host", "127.0.0.1"),
+        "ssh_host": strip_cidr(keep_str("ssh_host", "")),
         "ssh_port": keep_int("ssh_port", 22),
         "updated_at": ts,
     }
