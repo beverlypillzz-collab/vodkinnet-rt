@@ -195,6 +195,11 @@ router_ip() {
 	local ip
 	if command -v uci >/dev/null 2>&1; then
 		ip="$(uci -q get network.lan.ipaddr 2>/dev/null || true)"
+		# VodkinNET: strip a CIDR suffix if present (e.g. "10.0.0.1/27") -
+		# this is what caused the panel URL printed at the end of install to
+		# show up as "http://10.0.0.1/28/cgi-bin/..." with a stray path
+		# segment on some routers.
+		ip="${ip%%/*}"
 		if [ -n "$ip" ]; then
 			printf '%s\n' "$ip"
 			return

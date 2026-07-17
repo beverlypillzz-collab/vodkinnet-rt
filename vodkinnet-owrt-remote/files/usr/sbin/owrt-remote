@@ -81,6 +81,13 @@ truthy() {
 lan_ip_default() {
 	local ip
 	ip="$(uci -q get network.lan.ipaddr 2>/dev/null || true)"
+	# VodkinNET: network.lan.ipaddr can come back with a CIDR suffix baked in
+	# (observed live: "10.0.0.1/27" instead of bare "10.0.0.1") depending on
+	# how the interface was configured. Passing that straight through made
+	# admin_host/ssh_host end up as "10.0.0.1/27:80" - an invalid redirect
+	# target that Xray can't connect to at all, causing SSH/Admin to fail
+	# with Connection refused despite the rest of the config looking fine.
+	ip="${ip%%/*}"
 	if [ -n "$ip" ]; then
 		printf '%s' "$ip"
 	else
