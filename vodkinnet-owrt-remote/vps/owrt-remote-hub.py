@@ -1325,7 +1325,7 @@ def make_server_xray_config(rows, listen_host="0.0.0.0", listen_port=DEFAULT_VLE
                 "protocol": "tunnel",
                 "settings": {
                     "allowedNetwork": "tcp",
-                    "rewriteAddress": row["admin_host"],
+                    "rewriteAddress": row["admin_host"] or "127.0.0.1",
                     "rewritePort": int(row["admin_port"]),
                 },
             }
