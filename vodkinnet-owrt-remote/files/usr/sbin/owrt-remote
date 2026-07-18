@@ -81,6 +81,13 @@ truthy() {
 lan_ip_default() {
 	local ip
 	ip="$(uci -q get network.lan.ipaddr 2>/dev/null || true)"
+	# VodkinNET: network.lan.ipaddr can come back with a CIDR suffix baked in
+	# (observed live: "10.0.0.1/27" instead of bare "10.0.0.1") depending on
+	# how the interface was configured. Passing that straight through made
+	# admin_host/ssh_host end up as "10.0.0.1/27:80" - an invalid redirect
+	# target that Xray can't connect to at all, causing SSH/Admin to fail
+	# with Connection refused despite the rest of the config looking fine.
+	ip="${ip%%/*}"
 	if [ -n "$ip" ]; then
 		printf '%s' "$ip"
 	else
@@ -300,35 +307,43 @@ xray_bin_path() {
 # straight tonight while downloading Xray, with no automatic fallback. This
 # mirrors the fix in install.sh so router-side Xray installs are equally
 # resilient, not just the initial file fetch during setup.
-_fastly_hosts() {
-	case "$1" in
-		raw.githubusercontent.com|release-assets.githubusercontent.com|objects.githubusercontent.com|github-cloud.githubusercontent.com) return 0 ;;
-		*) return 1 ;;
-	esac
-}
+# VodkinNET: GitHub content is served from a small pool of Fastly edge IPs,
+# and individual addresses are sometimes unreachable from a given network for
+# minutes at a time. Xray downloads start at github.com (which usually
+# resolves fine) and get redirected (by curl/wget internally, invisibly to
+# our code) through release-assets.githubusercontent.com - so pinning only
+# the ORIGINAL request's hostname misses the actual blocked hop entirely.
+# Instead, whenever any github-related fetch fails, pin the WHOLE known pool
+# of these hostnames to the same working IP at once - they're served by the
+# same Fastly infrastructure, so one working IP covers all of them.
+_fastly_pool_hosts="raw.githubusercontent.com release-assets.githubusercontent.com objects.githubusercontent.com github-cloud.githubusercontent.com"
 
-_pin_fastly_ip() {
-	local host hosts_file ip tmp
-	host="$1"
-	_fastly_hosts "$host" || return 1
+_pin_fastly_pool() {
+	local ip hosts_file tmp host ok
 	hosts_file="/etc/hosts"
+	ok=""
 	for ip in 185.199.108.133 185.199.109.133 185.199.110.133 185.199.111.133; do
-		tmp="/tmp/.owrt-remote-hosts-probe.$$"
-		if [ -f "$hosts_file" ]; then
-			grep -v " $host\$" "$hosts_file" >"$tmp" 2>/dev/null || true
-		else
-			: >"$tmp"
-		fi
-		printf '%s %s\n' "$ip" "$host" >>"$tmp"
-		cp "$tmp" "$hosts_file"
-		rm -f "$tmp"
 		if command -v curl >/dev/null 2>&1; then
-			curl -fsS --connect-timeout 6 -o /dev/null "https://$host/" && return 0
+			curl -fsS --connect-timeout 6 --resolve "release-assets.githubusercontent.com:443:$ip" \
+				-o /dev/null "https://release-assets.githubusercontent.com/" 2>/dev/null && { ok="$ip"; break; }
 		elif command -v wget >/dev/null 2>&1; then
-			wget -T 6 -q -O /dev/null "https://$host/" && return 0
+			tmp="/tmp/.owrt-remote-probe.$$"
+			printf '%s release-assets.githubusercontent.com\n' "$ip" >>"$hosts_file"
+			wget -T 6 -q -O /dev/null "https://release-assets.githubusercontent.com/" 2>/dev/null && { ok="$ip"; break; }
+			sed -i '/ release-assets\.githubusercontent\.com$/d' "$hosts_file" 2>/dev/null || true
 		fi
 	done
-	return 1
+	[ -n "$ok" ] || return 1
+	for host in $_fastly_pool_hosts; do
+		if [ -f "$hosts_file" ]; then
+			tmp="/tmp/.owrt-remote-hosts.$$"
+			grep -v " $host\$" "$hosts_file" >"$tmp" 2>/dev/null || true
+			cp "$tmp" "$hosts_file"
+			rm -f "$tmp"
+		fi
+		printf '%s %s\n' "$ok" "$host" >>"$hosts_file"
+	done
+	return 0
 }
 
 fetch_file() {
@@ -796,7 +811,7 @@ doctor() {
 
 # Override Xray bootstrap with boot-safe retry logic.
 fetch_file() {
-	local url dst host
+	local url dst
 	url="$1"
 	dst="$2"
 	rm -f "$dst"
@@ -805,12 +820,13 @@ fetch_file() {
 	fi
 	# VodkinNET: this is the fetch_file() that actually runs (it shadows the
 	# earlier same-named function - shell just uses the last definition).
-	# It had no timeout and no fallback, which is exactly what caused a
-	# 5-minute hang tonight downloading Xray from release-assets.
-	# githubusercontent.com when the resolver handed us a blocked Fastly edge
-	# IP. Try pinning a known-working IP before giving up.
-	host="$(printf '%s' "$url" | sed -n 's#^https\?://\([^/]*\)/.*#\1#p')"
-	if _pin_fastly_ip "$host" && _fetch_file_attempt "$url" "$dst"; then
+	# Xray downloads start at github.com (resolves fine) and get redirected
+	# internally by curl/wget to release-assets.githubusercontent.com, which
+	# is what actually hits a blocked Fastly edge IP - our code never sees
+	# that intermediate hop directly, so pinning only "the failing URL's
+	# host" (github.com) never helped. Pin the whole known Fastly pool
+	# instead, then retry the original request.
+	if _pin_fastly_pool && _fetch_file_attempt "$url" "$dst"; then
 		return 0
 	fi
 	rm -f "$dst"

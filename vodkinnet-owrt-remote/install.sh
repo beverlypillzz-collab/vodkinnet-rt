@@ -59,54 +59,54 @@ target_path() {
 }
 
 vodkin_banner "OpenWrt Remote agent installer"
-
-# VodkinNET: raw.githubusercontent.com / release-assets.githubusercontent.com
-# are served from a small pool of Fastly edge IPs. Individual addresses in
-# this pool are sometimes unreachable from a given network (observed live:
-# 185.199.110.133 timed out for 5+ minutes while .108.133 worked instantly),
-# and neither wget nor curl retry across DNS answers on their own - they just
-# hang on whichever address the resolver handed them. This cost real
-# debugging time. _fastly_ips lists the fallback pool; _pin_fastly_ip tries
-# each one via a temporary /etc/hosts entry (works for both busybox wget and
-# curl, unlike curl-only --resolve) and keeps the first one that answers, so
-# every subsequent fetch in this run (and the agent's own Xray download)
-# benefits automatically too.
-_fastly_hosts() {
-	case "$1" in
-		raw.githubusercontent.com|release-assets.githubusercontent.com|objects.githubusercontent.com|github-cloud.githubusercontent.com) return 0 ;;
-		*) return 1 ;;
-	esac
-}
-
-_fastly_ips="185.199.108.133 185.199.109.133 185.199.110.133 185.199.111.133"
+# VodkinNET: GitHub content is served from a small pool of Fastly edge IPs.
+# Individual addresses in this pool are sometimes unreachable from a given
+# network (observed live: 185.199.110.133 timed out for 5+ minutes while
+# .108.133 worked instantly), and neither wget nor curl retry across DNS
+# answers on their own - they just hang on whichever address the resolver
+# handed them. Downloads that start at github.com (e.g. Xray release assets)
+# get redirected internally by curl/wget through release-assets.
+# githubusercontent.com - a different host than the one originally
+# requested - so pinning only "the exact host that was asked for" misses the
+# actual blocked hop. Pin the WHOLE known pool at once instead; they're
+# served by the same Fastly infrastructure, so one working IP covers all of
+# them, and every subsequent fetch in this run benefits automatically too.
+_fastly_pool_hosts="raw.githubusercontent.com release-assets.githubusercontent.com objects.githubusercontent.com github-cloud.githubusercontent.com"
 
 _host_of() {
 	printf '%s' "$1" | sed -n 's#^https\?://\([^/]*\)/.*#\1#p'
 }
 
-_pin_fastly_ip() {
-	local host hosts_file ip tmp
-	host="$1"
-	_fastly_hosts "$host" || return 1
+_pin_fastly_pool() {
+	local ip hosts_file tmp host ok
 	hosts_file="$(target_path etc/hosts)"
-	for ip in $_fastly_ips; do
-		info "Пробую $host через $ip..."
-		tmp="$(target_path tmp/.owrt-hosts-probe.$$)"
+	ok=""
+	for ip in 185.199.108.133 185.199.109.133 185.199.110.133 185.199.111.133; do
+		info "Пробую release-assets.githubusercontent.com через $ip..."
+		if command -v curl >/dev/null 2>&1; then
+			curl -fsS --connect-timeout 6 --resolve "release-assets.githubusercontent.com:443:$ip" \
+				-o /dev/null "https://release-assets.githubusercontent.com/" 2>/dev/null && { ok="$ip"; break; }
+		elif command -v wget >/dev/null 2>&1; then
+			tmp="$(target_path tmp/.owrt-probe.$$)"
+			printf '%s release-assets.githubusercontent.com\n' "$ip" >>"$hosts_file"
+			wget -T 6 -q -O /dev/null "https://release-assets.githubusercontent.com/" 2>/dev/null && { ok="$ip"; break; }
+			sed -i '/ release-assets\.githubusercontent\.com$/d' "$hosts_file" 2>/dev/null || true
+		fi
+	done
+	[ -n "$ok" ] || return 1
+	for host in $_fastly_pool_hosts; do
+		tmp="$(target_path tmp/.owrt-hosts.$$)"
 		if [ -f "$hosts_file" ]; then
 			grep -v " $host\$" "$hosts_file" >"$tmp" 2>/dev/null || true
 		else
 			: >"$tmp"
 		fi
-		printf '%s %s\n' "$ip" "$host" >>"$tmp"
+		printf '%s %s\n' "$ok" "$host" >>"$tmp"
 		cp "$tmp" "$hosts_file"
 		rm -f "$tmp"
-		if command -v curl >/dev/null 2>&1; then
-			curl -fsS --connect-timeout 6 -o /dev/null "https://$host/" && { info "Зафиксировал $host -> $ip"; return 0; }
-		elif command -v wget >/dev/null 2>&1; then
-			wget -T 6 -q -O /dev/null "https://$host/" && { info "Зафиксировал $host -> $ip"; return 0; }
-		fi
 	done
-	return 1
+	info "Зафиксировал весь пул GitHub-content хостов -> $ok"
+	return 0
 }
 
 fetch() {
@@ -118,7 +118,7 @@ fetch() {
 	fi
 	host="$(_host_of "$src")"
 	info "Не удалось скачать с первой попытки ($host), проверяю известные IP CDN..."
-	if _pin_fastly_ip "$host"; then
+	if _pin_fastly_pool; then
 		_fetch_once "$src" "$dst" && return 0
 	fi
 	die "не удалось скачать $src (ни обычным DNS, ни через известные IP)"
@@ -195,6 +195,11 @@ router_ip() {
 	local ip
 	if command -v uci >/dev/null 2>&1; then
 		ip="$(uci -q get network.lan.ipaddr 2>/dev/null || true)"
+		# VodkinNET: strip a CIDR suffix if present (e.g. "10.0.0.1/27") -
+		# this is what caused the panel URL printed at the end of install to
+		# show up as "http://10.0.0.1/28/cgi-bin/..." with a stray path
+		# segment on some routers.
+		ip="${ip%%/*}"
 		if [ -n "$ip" ]; then
 			printf '%s\n' "$ip"
 			return

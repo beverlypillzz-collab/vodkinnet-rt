@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0a0603,45:e01e1e,100:ff6a00&height=210&section=header&text=VodkinNET%20RT%20Hub&fontSize=42&fontColor=fff2e8&animation=fadeIn&fontAlignY=36&desc=Remote%20LuCI%20%2B%20SSH%20access%20through%20your%20own%20VPS%2C%20TLS-encrypted&descAlignY=58&descSize=16" alt="VodkinNET RT Hub" width="100%" />
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0a0603,45:e01e1e,100:ff6a00&height=210&section=header&text=VodkinNet%20RT%20Hub&fontSize=42&fontColor=fff2e8&animation=fadeIn&fontAlignY=36&desc=Remote%20LuCI%20%2B%20SSH%20access%20through%20your%20own%20VPS%2C%20TLS-encrypted&descAlignY=58&descSize=16" alt="VodkinNet RT Hub" width="100%" />
 
 <p>
   <a href="#-быстрый-старт"><img alt="Quick start" src="https://img.shields.io/badge/QUICK%20START-ONE%20COMMAND-22C55E?style=for-the-badge&labelColor=0a0603"></a>
@@ -35,7 +35,7 @@
 <h2> Что это такое</h2>
 
 <p>
-<b>VodkinNET RT Hub</b> — это связка из VPS-панели и OpenWrt-агента, которая даёт удобный удалённый доступ к роутерам без проброса LuCI и SSH наружу.<br>
+<b>VodkinNet RT Hub</b> — это связка из VPS-панели и OpenWrt-агента, которая даёт удобный удалённый доступ к роутерам без проброса LuCI и SSH наружу.<br>
 Роутер сам подключается к VPS изнутри сети, а ты заходишь в Hub-панель и открываешь нужный роутер, LuCI или SSH Web Terminal.
 </p>
 
@@ -146,6 +146,25 @@ OWRT_REMOTE_BRAND_URL=https://example.com OWRT_REMOTE_BRAND_NAME="MyBrand"
   drop-in, что и для TLS), чтобы кнопка "Терминал VPS" открывала shell
   этого пользователя вместо root — что-то привилегированное всё равно
   потребует явного `sudo`, как в обычной SSH-сессии.
+- **Admin host / SSH host в панели держи пустыми** — на карточке роутера
+  это отображается как `admin: авто (LAN IP)`. Это не заглушка: агент сам
+  вычисляет правильный адрес при каждом `render-client`, и это работает
+  корректно независимо от того, слушают ли dropbear/uhttpd на `0.0.0.0`
+  или только на LAN-интерфейсе. Заполняй эти поля вручную только если
+  реальный адрес отличается от LAN IP роутера (нестандартная сеть). Если
+  роутер был добавлен **до** этого фикса и в карточке всё ещё виден
+  жёсткий `127.0.0.1` — открой **Edit** для него и просто очисти оба поля.
+
+### Что ещё скрыто/автоматизировано в локальной панели агента
+
+- Поля `Hub URL`, `VPS host`, `VLESS UUID`, `SSH VLESS UUID` в форме
+  настроек роутера (`http://IP/cgi-bin/owrt-remote?key=...`) замаскированы
+  как пароль — это адреса и секреты reverse-туннеля, не должны палиться
+  при локальном доступе к одному роутеру из флота.
+- `/etc/owrt-remote/web.key` (ключ доступа к этой локальной панели)
+  генерируется сам при первом обращении, если отсутствует — не нужно
+  создавать его вручную (`mkdir`/`head`/`chmod`), даже если установка была
+  прервана на середине из-за сетевых проблем.
 
 ---
 
@@ -262,7 +281,7 @@ owrt-remote status
 ```mermaid
 flowchart LR
     U[User Browser] -->|HTTPS 443| N[nginx on VPS]
-    N --> H[VodkinNET RT Hub]
+    N --> H[VodkinNet RT Hub]
     H --> X[Xray Reverse]
     X --> R[OpenWrt Router]
     R --> L[LuCI]
@@ -287,7 +306,7 @@ flowchart LR
 <br><br>
 
 <img src="assets/vodkinnet-brand.jpg"
-     alt="VodkinNET RT Hub"
+     alt="VodkinNet RT Hub"
      width="720">
 
 <br><br>
@@ -840,11 +859,11 @@ wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/m
 
 <div align="center">
 
-<img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=20&duration=2800&pause=800&color=ff6a00&center=true&vCenter=true&width=760&lines=VodkinNET+RT+Hub;LuCI+%2B+SSH+through+your+own+VPS;No+direct+router+ports+exposed;Built+for+remote+router+control" alt="Typing SVG" />
+<img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=20&duration=2800&pause=800&color=ff6a00&center=true&vCenter=true&width=760&lines=VodkinNet+RT+Hub;LuCI+%2B+SSH+through+your+own+VPS;No+direct+router+ports+exposed;Built+for+remote+router+control" alt="Typing SVG" />
 
 <br>
 
-<b>VodkinNET RT Hub</b> — свой VPS, свой доступ, свои роутеры под контролем.
+<b>VodkinNet RT Hub</b> — свой VPS, свой доступ, свои роутеры под контролем.
 
 <br><br>
 
