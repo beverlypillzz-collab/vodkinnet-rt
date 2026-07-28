@@ -1,0 +1,84 @@
+# netcraze-remote — конфиг агента (Keenetic/KNDMS, Entware)
+#
+# Это обычный shell key="value" файл, никакого uci. Правь через vi/nano,
+# или удалённо через SMB-шару Entware (\\<IP роутера>\<метка>\opt\etc\netcraze-remote\)
+# как уже привычно для этого устройства.
+#
+# ПРОЩЕ ВСЕГО: не заполнять это вручную, а скопировать готовый блок целиком
+# со страницы роутера в панели Hub ("Конфиг для роутера" -> Копировать) —
+# там уже подставлены все ID/токены/UUID для конкретного роутера и всех
+# его сервисов.
+#
+# После заполнения — запусти:
+#   /opt/etc/init.d/S99netcraze-remote start
+
+# --- идентификация роутера ---
+ROUTER_ID="netcraze-office"
+ROUTER_NAME="Netcraze GIGA (офис)"
+ENABLED="1"
+
+# --- Hub (панель netcraze-remote на VPS) ---
+HUB_URL="https://REPLACE_ME.example.com"
+HUB_TOKEN="REPLACE_ME"
+
+# --- реверс-туннель (VLESS + опционально TLS до Hub) ---
+VPS_HOST="REPLACE_ME.example.com"
+VPS_PORT="8444"
+VLESS_ENCRYPTION="none"
+VLESS_FLOW=""
+# TLS_SNI = домен Hub. Пусто = канал БЕЗ шифрования (не рекомендуется — этим
+# каналом идёт логин ко ВСЕМ сервисам ниже, включая SSH). Hub сам решает,
+# заполнять это поле или нет, в зависимости от того, настроен ли у него TLS.
+TLS_SNI="REPLACE_ME.example.com"
+
+# --- xray ---
+# Оставь пустым — агент сам найдёт бинарь (или поставит через opkg).
+# ВАЖНО: это ОТДЕЛЬНЫЙ процесс от XKeen. netcraze-remote никогда не трогает
+# /opt/etc/xray/configs/ (конфиги XKeen) — свой конфиг ниже, свой процесс.
+XRAY_BIN=""
+XRAY_CONFIG="/opt/etc/netcraze-remote/xray-client.json"
+
+# --- heartbeat ---
+HEARTBEAT_INTERVAL="30"
+
+# --- сервисы (каждый — отдельный независимый реверс-туннель) -------------
+# ВАЖНО: на KNDMS "SSH" — это не обязательно ОДНА вещь. Есть SSH самой NDMS,
+# и может отдельно стоять свой sshd/dropbear внутри Entware (через opkg) —
+# это РАЗНЫЕ сервисы на разных портах. Не гадай — после install.sh посмотри
+# на реально обнаруженные слушающие порты, и добавь нужные сервисы в Hub
+# кнопкой "+ Добавить сервис" на странице роутера (или через API).
+#
+# Ниже — только 2 дефолтных сервиса, которые Hub создаёт автоматически при
+# добавлении роутера. Если добавишь ещё сервисы в Hub — они появятся здесь
+# при следующем копировании блока конфига (или через `netcraze-remote
+# pull-config`, который перетянет актуальный список автоматически).
+SERVICE_COUNT="2"
+
+SERVICE_1_SLUG="ndms-admin"
+SERVICE_1_LABEL="NDMS веб-морда"
+SERVICE_1_KIND="http"
+SERVICE_1_HOST="127.0.0.1"
+SERVICE_1_PORT="80"
+SERVICE_1_UUID="REPLACE_ME"
+SERVICE_1_TAG="REPLACE_ME"
+
+SERVICE_2_SLUG="ssh-ndms"
+SERVICE_2_LABEL="SSH (NDMS)"
+SERVICE_2_KIND="ssh"
+SERVICE_2_HOST="127.0.0.1"
+# ⚠️ на этой прошивке SSH может быть на 22 ИЛИ 222 — install.sh покажет,
+# что реально слушается локально, при установке.
+SERVICE_2_PORT="22"
+SERVICE_2_UUID="REPLACE_ME"
+SERVICE_2_TAG="REPLACE_ME"
+
+# Пример третьего сервиса — SSH ВНУТРИ Entware (если opkg install openssh-server
+# или dropbear ставился отдельно от SSH самой NDMS), обычно другой порт:
+#
+# SERVICE_3_SLUG="ssh-entware"
+# SERVICE_3_LABEL="SSH (Entware)"
+# SERVICE_3_KIND="ssh"
+# SERVICE_3_HOST="127.0.0.1"
+# SERVICE_3_PORT="2222"
+# SERVICE_3_UUID="REPLACE_ME"
+# SERVICE_3_TAG="REPLACE_ME"

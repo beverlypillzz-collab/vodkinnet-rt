@@ -1,0 +1,21 @@
+[Unit]
+Description=netcraze-remote Hub (Keenetic/KNDMS fleet panel)
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/netcraze-remote/hub.env
+ExecStart=/usr/bin/python3 /opt/netcraze-remote/netcraze-remote-hub.py serve
+Restart=on-failure
+RestartSec=3
+# VodkinNET: НЕ root. Единственное root-действие (рестарт netcraze-remote-xray)
+# идёт через узкое sudoers-правило (см. netcraze-remote.sudoers), не через
+# полные права самого процесса — это интернет-facing HTTP-сервер.
+User=netcraze-remote
+Group=netcraze-remote
+WorkingDirectory=/opt/netcraze-remote
+ProtectSystem=strict
+ReadWritePaths=/var/lib/netcraze-remote /etc/netcraze-remote
+
+[Install]
+WantedBy=multi-user.target
