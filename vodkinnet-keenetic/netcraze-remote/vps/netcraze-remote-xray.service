@@ -1,0 +1,17 @@
+[Unit]
+Description=netcraze-remote Xray (reverse tunnel portal for Keenetic fleet)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/netcraze-remote-xray run -config /etc/netcraze-remote/xray.json
+Restart=on-failure
+RestartSec=3
+# VodkinNET: не root — читает сертификат через членство в группе ssl-cert
+# (стандартный для этого сервера паттерн, как и у соседних панелей).
+User=netcraze-remote
+Group=netcraze-remote
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

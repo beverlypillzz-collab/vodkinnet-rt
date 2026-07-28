@@ -1,0 +1,32 @@
+#!/bin/sh
+# Entware init.d — НЕ procd (procd на KNDMS нет, это не OpenWrt).
+# rc.unslung/Entware сам вызывает все исполняемые /opt/etc/init.d/S* скрипты
+# с аргументом "start" при старте роутера, и "stop" при остановке Entware.
+
+ENABLE="/opt/etc/netcraze-remote/netcraze-remote.conf"
+AGENT="/opt/sbin/netcraze-remote"
+
+[ -x "$AGENT" ] || { echo "netcraze-remote: агент не найден ($AGENT)"; exit 0; }
+
+case "${1:-start}" in
+	start)
+		if [ ! -f "$ENABLE" ]; then
+			echo "netcraze-remote: конфиг не найден ($ENABLE) — пропускаю автозапуск, см. .conf.example"
+			exit 0
+		fi
+		"$AGENT" start
+		;;
+	stop)
+		"$AGENT" stop
+		;;
+	restart)
+		"$AGENT" restart
+		;;
+	status)
+		"$AGENT" status
+		;;
+	*)
+		echo "Использование: $0 {start|stop|restart|status}"
+		exit 1
+		;;
+esac

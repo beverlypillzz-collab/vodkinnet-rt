@@ -1,0 +1,12 @@
+# netcraze-remote: узкое sudoers-правило.
+#
+# Hub-процесс работает от непривилегированного системного пользователя
+# netcraze-remote (см. install-vps.sh) — единственное root-действие,
+# которое ему реально нужно, это перезапуск ОДНОГО конкретного systemd-юнита
+# после изменения списка роутеров/сервисов. Полный root для самого Hub-
+# процесса тут ни к чему и было бы лишним риском (интернет-facing процесс,
+# read+write в свою SQLite-базу по пользовательскому вводу).
+#
+# Путь к systemctl подставляется install-vps.sh через sed при установке —
+# %SYSTEMCTL_PATH% ниже не финальное значение.
+netcraze-remote ALL=(root) NOPASSWD: %SYSTEMCTL_PATH% restart netcraze-remote-xray
