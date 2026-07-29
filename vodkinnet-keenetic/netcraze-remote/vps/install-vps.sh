@@ -109,10 +109,22 @@ read -r EXTERNAL_HTTPS_PORT < /dev/tty
 # собственный Xray VLESS-порт, её HTTP-бэкенд и т.д.) — тогда установка
 # доходит почти до конца и падает на "nginx: bind() ... Address already
 # in use" в самом конце, потратив время впустую. Проверяем заранее.
-if command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -qE "[:.]${EXTERNAL_HTTPS_PORT}[[:space:]]"; then
+#
+# НО: если порт уже занят — конкретно nginx'ом, И у нас уже есть свой же
+# nginx-vhost на этот порт с прошлого (например прерванного) запуска
+# install-vps.sh — это не конфликт с чужим сервисом, а повторный прогон
+# по своим же следам. nginx спокойно перечитает тот же конфиг заново.
+PORT_ALREADY_OURS=0
+if [ -f "/etc/nginx/sites-available/netcraze-remote" ] && \
+   grep -q "listen ${EXTERNAL_HTTPS_PORT} ssl;" "/etc/nginx/sites-available/netcraze-remote" 2>/dev/null; then
+	PORT_ALREADY_OURS=1
+fi
+
+if [ "$PORT_ALREADY_OURS" = "0" ] && command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -qE "[:.]${EXTERNAL_HTTPS_PORT}[[:space:]]"; then
 	err "порт ${EXTERNAL_HTTPS_PORT} уже занят каким-то процессом на этом сервере (проверь: ss -tlnp | grep :${EXTERNAL_HTTPS_PORT}). Выбери другой порт и запусти установку заново."
 	exit 1
 fi
+[ "$PORT_ALREADY_OURS" = "1" ] && info "порт ${EXTERNAL_HTTPS_PORT} уже используется собственным nginx-vhost netcraze-remote с прошлого запуска — переиспользую, это ожидаемо."
 
 VLESS_PORT="${NETCRAZE_REMOTE_VLESS_PORT:-8444}"
 HUB_PORT="${NETCRAZE_REMOTE_HUB_PORT:-8099}"
