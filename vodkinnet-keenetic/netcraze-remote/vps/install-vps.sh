@@ -203,7 +203,7 @@ sudo -u "$SVC_USER" env \
 	python3 "${INSTALL_DIR}/netcraze-remote-hub.py" set-admin-password "$ADMIN_USER"
 
 # shellcheck disable=SC2046
-sudo -u "$SVC_USER" env $(grep -v '^#' "$ENV_FILE" | xargs) NETCRAZE_REMOTE_SUDO_RESTART=0 \
+sudo -u "$SVC_USER" env $(grep -v '^#' "$ENV_FILE" | xargs) NETCRAZE_REMOTE_SKIP_RESTART=1 \
 	python3 "${INSTALL_DIR}/netcraze-remote-hub.py" regen-xray
 
 # --- sudoers: узкое правило, только рестарт netcraze-remote-xray ---
