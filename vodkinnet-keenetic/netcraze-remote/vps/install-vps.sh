@@ -264,7 +264,11 @@ server {
 }
 EOF
 ln -sf /etc/nginx/sites-available/netcraze-remote /etc/nginx/sites-enabled/netcraze-remote
-nginx -t && systemctl reload nginx
+nginx -t
+# VodkinNET: "reload" не работает, если nginx сейчас не активен (может
+# оказаться так на боевом сервере по не связанным с этим скриптом
+# причинам) — "restart" корректно и стартует, и рестартует в любом случае.
+systemctl restart nginx
 
 # --- firewall (ufw, если есть) ---
 if command -v ufw >/dev/null 2>&1; then

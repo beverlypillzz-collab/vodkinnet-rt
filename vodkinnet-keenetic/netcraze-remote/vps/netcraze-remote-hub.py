@@ -340,6 +340,20 @@ def regenerate_xray_config_and_reload():
     XRAY_CONFIG_PATH.write_text(json.dumps(config, indent=2))
     os.chmod(XRAY_CONFIG_PATH, 0o600)
 
+    # VodkinNET: при самой первой установке этот код вызывается ДО того,
+    # как systemd-юнит netcraze-remote-xray.service вообще создан
+    # install-vps.sh (юнит появляется позже). Рестарт несуществующего
+    # юнита бессмыслен и на некоторых системах уходит в polkit-промпт
+    # интерактивной авторизации ("AUTHENTICATING FOR
+    # org.freedesktop.systemd1.manage-units"), который висит и таймаутится
+    # 15 секунд ни за что. Юнит-файл ещё не существует — просто выходим,
+    # писать xray.json и без этого нужно было (конфиг подхватится при
+    # первом же systemctl enable --now чуть позже в install-vps.sh).
+    unit_path = Path("/etc/systemd/system") / f"{XRAY_SERVICE_NAME}.service"
+    if not unit_path.exists():
+        print(f"[info] юнит {XRAY_SERVICE_NAME} ещё не установлен — конфиг записан, рестарт пропущен", file=sys.stderr)
+        return
+
     cmd = ["systemctl", "restart", XRAY_SERVICE_NAME]
     if USE_SUDO_FOR_RESTART:
         cmd = ["sudo", "-n"] + cmd
@@ -1081,7 +1095,7 @@ def cmd_set_admin_password(args):
 def cmd_regen_xray(_args):
     db_init()
     regenerate_xray_config_and_reload()
-    print(f"Xray-конфиг перезаписан: {XRAY_CONFIG_PATH}, сервис {XRAY_SERVICE_NAME} перезапущен")
+    print(f"Xray-конфиг записан: {XRAY_CONFIG_PATH} (см. вывод выше про перезапуск/пропуск сервиса {XRAY_SERVICE_NAME})")
 
 
 def main():
