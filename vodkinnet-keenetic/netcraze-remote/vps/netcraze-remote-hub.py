@@ -1007,6 +1007,28 @@ def connect(db_path=DB_PATH):
 
 
 def init_db(conn):
+    # VodkinNET: "create table if not exists" ничего не делает, если таблица
+    # routers уже существует с ДРУГОЙ схемой (например от старой,
+    # до-переносной версии этого же проекта — там были совсем другие
+    # колонки: token/last_info вместо entry_port/vless_uuid/admin_host).
+    # ensure_column() ниже патчит только несколько КОНКРЕТНЫХ добавленных
+    # позже колонок, а не всю схему — если табличка совсем старая, первый
+    # же запрос типа "update routers set entry_port = ..." падает сырым
+    # sqlite3.OperationalError: no such column: entry_port, что видел на
+    # практике при обновлении с несовместимой версии. Проверяем явно и
+    # даём понятную инструкцию вместо трейсбека.
+    existing_cols = {row["name"] for row in conn.execute("pragma table_info(routers)")}
+    if existing_cols and not {"entry_port", "vless_uuid", "admin_host"}.issubset(existing_cols):
+        raise SystemExit(
+            "БД в несовместимом (старом) формате: таблица 'routers' существует, "
+            "но без колонок этой версии (entry_port/vless_uuid/admin_host). "
+            "Это база от старой/другой версии netcraze-remote. Тестовые данные "
+            "не жалко — удали файл БД и запусти установку заново:\n"
+            f"  systemctl stop netcraze-remote-hub netcraze-remote-xray 2>/dev/null\n"
+            f"  rm -f {DB_PATH}\n"
+            "  (затем повтори install-vps.sh)"
+        )
+
     conn.execute(
         """
         create table if not exists routers (
