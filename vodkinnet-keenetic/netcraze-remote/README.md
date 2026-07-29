@@ -134,6 +134,46 @@ opkg — ничего не пытается работать, если Entware �
 (см. `netcraze_vpn_setup_summary.md`, документированный баг "Entware
 числится включённым на диске, но не развёрнут").
 
+## Установка
+
+### 1. VPS — Hub
+
+```sh
+curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/vps/install-vps.sh?v=$(date +%s)" | sudo sh
+```
+
+Спросит домен, выпустит сертификат, создаст системного пользователя
+`netcraze-remote`, поставит отдельный бинарь Xray с проверкой checksum,
+настроит sudoers-правило, certbot deploy-hook, и напечатает пароль
+администратора один раз.
+
+> Обычная для `curl | sh` схемы оговорка: скрипт тянет код из ветки `main`
+> публичного репозитория. Для продакшн-инсталляций разумно закрепиться на
+> конкретном коммите/тэге вместо `main`, если это важно для модели угроз.
+
+### 2. Keenetic/KNDMS — агент
+
+Сначала должен быть настроен Entware (см. `netcraze_vpn_setup_summary.md`
+в базе знаний — раздел про Entware/OPKG на этой прошивке).
+
+```sh
+wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/install.sh?v=$(date +%s)" | sh
+```
+
+Скрипт сам проверит, что Entware реально работает (не просто "числится"),
+и покажет список реально слушающих локальных портов (чтобы понять, есть
+ли отдельный SSH внутри Entware помимо SSH самой NDMS).
+
+Дальше:
+1. В панели Hub → "Добавить роутер" → название (создаст 2 дефолтных сервиса).
+2. Если нужен второй SSH (Entware) или что-то ещё — "+ Добавить сервис"
+   на странице роутера, используя порты из списка, который показал install.sh.
+3. Скопируй блок конфига целиком (кнопка "Копировать").
+4. Вставь в `/opt/etc/netcraze-remote/netcraze-remote.conf` на Keenetic
+   (проще всего через SMB-шару Entware).
+5. `/opt/etc/init.d/S99netcraze-remote start`
+6. `netcraze-remote doctor` — диагностика.
+
 ## Удаление
 
 ### Роутер (Keenetic/KNDMS)
@@ -178,46 +218,6 @@ REMOVE_USER=1 sudo sh uninstall-vps.sh    # + удалить системног�
 полная зачистка без следа). Сертификат Let's Encrypt при этом **не**
 удаляется — если домен общий с другой панелью (см. секцию про общий
 домен ниже), трогать его руками отдельно от netcraze-remote не нужно.
-
-## Установка
-
-### 1. VPS — Hub
-
-```sh
-curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/vps/install-vps.sh?v=$(date +%s)" | sudo sh
-```
-
-Спросит домен, выпустит сертификат, создаст системного пользователя
-`netcraze-remote`, поставит отдельный бинарь Xray с проверкой checksum,
-настроит sudoers-правило, certbot deploy-hook, и напечатает пароль
-администратора один раз.
-
-> Обычная для `curl | sh` схемы оговорка: скрипт тянет код из ветки `main`
-> публичного репозитория. Для продакшн-инсталляций разумно закрепиться на
-> конкретном коммите/тэге вместо `main`, если это важно для модели угроз.
-
-### 2. Keenetic/KNDMS — агент
-
-Сначала должен быть настроен Entware (см. `netcraze_vpn_setup_summary.md`
-в базе знаний — раздел про Entware/OPKG на этой прошивке).
-
-```sh
-wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/install.sh?v=$(date +%s)" | sh
-```
-
-Скрипт сам проверит, что Entware реально работает (не просто "числится"),
-и покажет список реально слушающих локальных портов (чтобы понять, есть
-ли отдельный SSH внутри Entware помимо SSH самой NDMS).
-
-Дальше:
-1. В панели Hub → "Добавить роутер" → название (создаст 2 дефолтных сервиса).
-2. Если нужен второй SSH (Entware) или что-то ещё — "+ Добавить сервис"
-   на странице роутера, используя порты из списка, который показал install.sh.
-3. Скопируй блок конфига целиком (кнопка "Копировать").
-4. Вставь в `/opt/etc/netcraze-remote/netcraze-remote.conf` на Keenetic
-   (проще всего через SMB-шару Entware).
-5. `/opt/etc/init.d/S99netcraze-remote start`
-6. `netcraze-remote doctor` — диагностика.
 
 ## Что сознательно НЕ сделано (см. "На горизонте")
 
