@@ -44,6 +44,15 @@ XRAY_SERVICE_NAME = os.environ.get("NETCRAZE_REMOTE_XRAY_SERVICE", "netcraze-rem
 # (см. vps/install-vps.sh, vps/netcraze-remote.sudoers). SUDO_RESTART=0 —
 # аварийный клапан для сред, где Hub всё же запущен от root напрямую.
 USE_SUDO_FOR_RESTART = os.environ.get("NETCRAZE_REMOTE_SUDO_RESTART", "1") != "0"
+# VodkinNET: отдельно от USE_SUDO_FOR_RESTART — если этот флаг включён, не
+# пытаемся вызвать systemctl вообще, даже без sudo. Раньше "без sudo"
+# означало голый systemctl-вызов от непривилегированного пользователя,
+# который на некоторых системах уходит в интерактивный polkit-промпт
+# (AUTHENTICATING FOR org.freedesktop.systemd1.manage-units) и виснет.
+# Нужно для самых ранних bootstrap-вызовов в install-vps.sh, до того как
+# появился sudoers и/или сам systemd-юнит — тогда рестарт заведомо не
+# нужен и не имеет смысла пытаться его делать вообще, любым способом.
+SKIP_RESTART_ENTIRELY = os.environ.get("NETCRAZE_REMOTE_SKIP_RESTART", "0") == "1"
 
 BIND_HOST = os.environ.get("NETCRAZE_REMOTE_BIND", "127.0.0.1")
 BIND_PORT = int(os.environ.get("NETCRAZE_REMOTE_PORT", "8099"))
@@ -340,8 +349,20 @@ def regenerate_xray_config_and_reload():
     XRAY_CONFIG_PATH.write_text(json.dumps(config, indent=2))
     os.chmod(XRAY_CONFIG_PATH, 0o600)
 
-    # VodkinNET: при самой первой установке этот код вызывается ДО того,
-    # как systemd-юнит netcraze-remote-xray.service вообще создан
+    # VodkinNET: при самой первой установке (и при повторных прогонах
+    # install-vps.sh) этот код может вызываться ДО того, как sudoers-
+    # правило готово, даже если сам systemd-юнит уже существует с
+    # прошлого раза. NETCRAZE_REMOTE_SKIP_RESTART=1 — явный сигнал "вообще
+    # не трогай systemctl", используется install-vps.sh именно для такого
+    # раннего bootstrap-вызова, чтобы не рисковать голым (без sudo)
+    # systemctl-вызовом от непривилегированного пользователя, который
+    # уходит в интерактивный polkit-промпт и виснет.
+    if SKIP_RESTART_ENTIRELY:
+        print(f"[info] NETCRAZE_REMOTE_SKIP_RESTART=1 — конфиг записан, systemctl не вызывается вообще", file=sys.stderr)
+        return
+
+    # При самой первой установке этот код вызывается ДО того, как
+    # systemd-юнит netcraze-remote-xray.service вообще создан
     # install-vps.sh (юнит появляется позже). Рестарт несуществующего
     # юнита бессмыслен и на некоторых системах уходит в polkit-промпт
     # интерактивной авторизации ("AUTHENTICATING FOR
