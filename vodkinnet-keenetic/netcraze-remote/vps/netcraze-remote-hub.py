@@ -1864,7 +1864,7 @@ input,select{{min-width:0;border:1px solid var(--line);border-radius:8px;padding
   <section class="top">
     <div class="brand">
       <div class="brandPanel">
-        <h1 class="appBanner"><span>NETCRAZE<b style="color:#2f8fff">·</b>RT HUB</span></h1>
+        <h1 class="appBanner"><span>VODKIN<b style="color:#2f8fff">NET</b> · RT HUB</span></h1>
         <div class="links">
           <a href="https://github.com/beverlypillzz-collab/vodkinnet-rt" target="_blank" rel="noopener noreferrer">GitHub</a>
         </div>
