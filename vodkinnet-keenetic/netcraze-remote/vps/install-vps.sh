@@ -25,6 +25,36 @@ ok()   { printf '%b[+]%b %s\n' "$C_GREEN" "$C_NC" "$*"; }
 info() { printf '%b[i]%b %s\n' "$C_YELLOW" "$C_NC" "$*"; }
 err()  { printf '%b[!!]%b %s\n' "$C_RED" "$C_NC" "$*" >&2; }
 
+# VodkinNET: raw.githubusercontent.com (Fastly) кэширует по эджам, привязанным
+# к сети запроса — при curl|sh с VPS можно словить другой, более старый эдж,
+# чем при проверке с другой машины, и кэш-бастинг query-строкой не всегда
+# помогает именно с этим CDN (было на практике: install-vps.sh с VPS долго
+# отдавал старую версию, хотя с другой машины CDN уже отдавал свежую). Если
+# скрипт запущен как реальный файл из локального git-клона (git clone + sh
+# install-vps.sh, а не curl|sh), рядом с ним лежат актуальные копии всех
+# нужных файлов — берём их напрямую, без похода в CDN вообще. Фолбэк на
+# curl+REPO_RAW остаётся для классического curl|sh.
+SCRIPT_DIR=""
+case "${0:-}" in
+	/*|./*|../*)
+		if [ -f "$0" ]; then
+			SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+		fi
+		;;
+esac
+
+fetch_file() {
+	# fetch_file RELATIVE_PATH_IN_REPO DEST_PATH
+	local rel="$1" dest="$2" local_candidate
+	local_candidate="${SCRIPT_DIR}/${rel#vps/}"
+	if [ -n "$SCRIPT_DIR" ] && [ -f "$local_candidate" ]; then
+		cp "$local_candidate" "$dest"
+		info "взял ${rel} из локального клона (не из CDN): $local_candidate"
+	else
+		curl -fsSL "${REPO_RAW}/${rel}?v=$(date +%s)" -o "$dest"
+	fi
+}
+
 [ "$(id -u)" = "0" ] || { err "запусти под root (sudo)"; exit 1; }
 
 info "IP/домен VPS (для этой панели, ОТДЕЛЬНО от других панелей на этом сервере):"
@@ -101,7 +131,7 @@ else
 fi
 
 # --- Hub script ---
-curl -fsSL "${REPO_RAW}/vps/netcraze-remote-hub.py?v=$(date +%s)" -o "${INSTALL_DIR}/netcraze-remote-hub.py"
+fetch_file "vps/netcraze-remote-hub.py" "${INSTALL_DIR}/netcraze-remote-hub.py"
 chmod +x "${INSTALL_DIR}/netcraze-remote-hub.py"
 chown "$SVC_USER:$SVC_USER" "${INSTALL_DIR}/netcraze-remote-hub.py"
 
@@ -125,7 +155,7 @@ echo "$HUB_DOMAIN" > "${XRAY_CONFIG_DIR}/cert-domain"
 
 # --- certbot deploy-hook: чинит права ключа + рестартит ТОЛЬКО наш xray ---
 mkdir -p /etc/letsencrypt/renewal-hooks/deploy
-curl -fsSL "${REPO_RAW}/vps/certbot-deploy-hook.sh?v=$(date +%s)" -o /etc/letsencrypt/renewal-hooks/deploy/netcraze-remote.sh
+fetch_file "vps/certbot-deploy-hook.sh" /etc/letsencrypt/renewal-hooks/deploy/netcraze-remote.sh
 chmod +x /etc/letsencrypt/renewal-hooks/deploy/netcraze-remote.sh
 
 # --- пароль администратора: НЕ передаём как argv (виден в ps/history) ---
@@ -170,7 +200,7 @@ sudo -u "$SVC_USER" env $(grep -v '^#' "$ENV_FILE" | xargs) NETCRAZE_REMOTE_SUDO
 
 # --- sudoers: узкое правило, только рестарт netcraze-remote-xray ---
 SYSTEMCTL_PATH="$(command -v systemctl || echo /usr/bin/systemctl)"
-curl -fsSL "${REPO_RAW}/vps/netcraze-remote.sudoers?v=$(date +%s)" -o /tmp/netcraze-remote.sudoers.tmp
+fetch_file "vps/netcraze-remote.sudoers" /tmp/netcraze-remote.sudoers.tmp
 sed "s#%SYSTEMCTL_PATH%#${SYSTEMCTL_PATH}#" /tmp/netcraze-remote.sudoers.tmp > /tmp/netcraze-remote.sudoers.final
 if visudo -c -f /tmp/netcraze-remote.sudoers.final >/dev/null 2>&1; then
 	install -m 0440 /tmp/netcraze-remote.sudoers.final /etc/sudoers.d/netcraze-remote
@@ -181,8 +211,8 @@ fi
 rm -f /tmp/netcraze-remote.sudoers.tmp /tmp/netcraze-remote.sudoers.final
 
 # --- systemd units ---
-curl -fsSL "${REPO_RAW}/vps/netcraze-remote-hub.service?v=$(date +%s)" -o /etc/systemd/system/netcraze-remote-hub.service
-curl -fsSL "${REPO_RAW}/vps/netcraze-remote-xray.service?v=$(date +%s)" -o /etc/systemd/system/netcraze-remote-xray.service
+fetch_file "vps/netcraze-remote-hub.service" /etc/systemd/system/netcraze-remote-hub.service
+fetch_file "vps/netcraze-remote-xray.service" /etc/systemd/system/netcraze-remote-xray.service
 sed -i "s#/usr/local/bin/netcraze-remote-xray#${XRAY_BIN}#" /etc/systemd/system/netcraze-remote-xray.service
 sed -i "s#/etc/netcraze-remote/xray.json#${XRAY_CONFIG}#" /etc/systemd/system/netcraze-remote-xray.service
 
