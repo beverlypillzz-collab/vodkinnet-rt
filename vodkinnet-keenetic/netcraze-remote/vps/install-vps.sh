@@ -58,7 +58,7 @@ chmod 750 "$STATE_DIR" "$XRAY_CONFIG_DIR"
 
 # --- Xray binary (отдельная копия, отдельное имя бинаря, с проверкой checksum) ---
 if [ ! -x "$XRAY_BIN" ]; then
-	info "ставлю отдельный бинарь Xray для netcraze-remote (с проверкой SHA256SUMS релиза)..."
+	info "ставлю отдельный бинарь Xray для netcraze-remote (с проверкой .dgst релиза)..."
 	TMP_DIR="$(mktemp -d)"
 	ARCH="$(uname -m)"
 	case "$ARCH" in
@@ -67,21 +67,27 @@ if [ ! -x "$XRAY_BIN" ]; then
 		*) err "неизвестная архитектура $ARCH, поставь Xray вручную в $XRAY_BIN"; exit 1 ;;
 	esac
 
-	curl -fsSL -o "$TMP_DIR/xray.zip" "https://github.com/XTLS/Xray-core/releases/latest/download/${XRAY_ASSET}"
-	curl -fsSL -o "$TMP_DIR/SHA256SUMS" "https://github.com/XTLS/Xray-core/releases/latest/download/SHA256SUMS" || true
+	XRAY_DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/latest/download/${XRAY_ASSET}"
+	curl -fsSL -o "$TMP_DIR/xray.zip" "$XRAY_DOWNLOAD_URL"
+	# VodkinNET: у Xray-core НЕТ единого SHA256SUMS на релиз — у каждого
+	# ассета свой файл проверки "<имя>.dgst" с полями MD5=/SHA1=/SHA256=/
+	# SHA512= (см. официальный XTLS/Xray-install/install-release.sh,
+	# функция download_xray). Первая версия этого скрипта пыталась брать
+	# несуществующий общий SHA256SUMS и падала 404 — это исправление.
+	curl -fsSL -o "$TMP_DIR/xray.zip.dgst" "${XRAY_DOWNLOAD_URL}.dgst" || true
 
-	if [ -s "$TMP_DIR/SHA256SUMS" ]; then
-		EXPECTED_SUM="$(grep " ${XRAY_ASSET}\$" "$TMP_DIR/SHA256SUMS" | awk '{print $1}' | head -n1)"
+	if [ -s "$TMP_DIR/xray.zip.dgst" ] && ! grep -q "Not Found" "$TMP_DIR/xray.zip.dgst"; then
+		EXPECTED_SUM="$(awk -F'= ' '/256=/{print $2}' "$TMP_DIR/xray.zip.dgst" | tr -d '[:space:]')"
 		ACTUAL_SUM="$(sha256sum "$TMP_DIR/xray.zip" | awk '{print $1}')"
 		if [ -n "$EXPECTED_SUM" ] && [ "$EXPECTED_SUM" = "$ACTUAL_SUM" ]; then
-			ok "checksum Xray-core подтверждён (SHA256 совпадает с релизом)"
+			ok "checksum Xray-core подтверждён (SHA256 из .dgst совпадает)"
 		else
-			err "checksum Xray-core НЕ совпадает или не найден в SHA256SUMS — прерываю установку (supply-chain risk)"
+			err "checksum Xray-core НЕ совпадает — прерываю установку (supply-chain risk)"
 			rm -rf "$TMP_DIR"
 			exit 1
 		fi
 	else
-		err "не удалось скачать SHA256SUMS релиза — не могу проверить целостность бинаря, прерываю"
+		err "не удалось скачать/распарсить .dgst для этой версии релиза — не могу проверить целостность бинаря, прерываю"
 		rm -rf "$TMP_DIR"
 		exit 1
 	fi
