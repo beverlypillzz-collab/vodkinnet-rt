@@ -648,6 +648,32 @@ pre{background:rgba(0,0,0,.32);border:1px solid var(--line);border-radius:8px;pa
 .kindtag{font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.08);color:#f3d9c0;margin-left:8px;border:1px solid var(--line)}
 .svc-grid{display:grid;gap:12px}
 a{color:var(--cyan)}
+.cardTop{display:flex;flex-direction:column;align-items:center;gap:0}
+.routerMark{position:relative;display:grid;place-items:center;width:52px;height:52px;border-radius:8px;background:rgba(255,255,255,.08);overflow:hidden;box-shadow:0 0 24px rgba(255,154,60,.12);margin:0 auto}
+.routerMark::before{content:"";position:absolute;inset:-45%;background:conic-gradient(from 0deg,transparent,rgba(255,154,60,.72),rgba(255,106,0,.62),rgba(251,191,36,.52),transparent);animation:routerHalo 5.8s linear infinite}
+.routerMark::after{content:"";position:absolute;inset:2px;border-radius:7px;background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(255,255,255,.05)),rgba(19,14,32,.95);border:1px solid rgba(255,255,255,.16)}
+.routerIcon{position:relative;z-index:1;width:30px;height:20px;border:2px solid #fbbf24;border-radius:6px;box-shadow:0 0 18px rgba(251,191,36,.24)}
+.routerIcon::before,.routerIcon::after{content:"";position:absolute;top:-10px;width:10px;height:10px;border-top:2px solid #a5f3fc}
+.routerIcon::before{left:1px;transform:rotate(-34deg)}
+.routerIcon::after{right:1px;transform:rotate(34deg)}
+.routerIcon span{position:absolute;left:5px;right:5px;bottom:4px;display:flex;justify-content:space-between}
+.routerIcon span::before,.routerIcon span::after{content:"";width:4px;height:4px;border-radius:50%;background:#22c55e;box-shadow:0 0 10px #22c55e;animation:statusPulse 1.8s ease-in-out infinite}
+.card.off .routerIcon span::before,.card.off .routerIcon span::after{background:#fb7185;box-shadow:0 0 10px #fb7185}
+@keyframes routerHalo{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.status{display:inline-flex;align-items:center;gap:7px;border-radius:999px;border:1px solid rgba(34,197,94,.36);background:rgba(34,197,94,.14);padding:7px 10px;font-weight:900;font-size:12px;color:#bbf7d0;margin-top:12px}
+.status i{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 13px var(--green);animation:statusPulse 1.6s ease-in-out infinite;font-style:normal}
+.status.off{border-color:rgba(251,113,133,.36);background:rgba(251,113,133,.12);color:#fecdd3}
+.status.off i{background:var(--red);box-shadow:0 0 13px var(--red);animation:offlinePulse 1.9s ease-in-out infinite}
+.name{display:inline-flex;align-items:center;justify-content:center;max-width:100%;min-height:34px;margin-top:10px;padding:7px 12px;border:1px solid rgba(251,191,36,.48);border-radius:999px;background:linear-gradient(135deg,rgba(251,191,36,.32),rgba(245,158,11,.22),rgba(255,255,255,.07));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff;font-size:13px;line-height:1;font-weight:900;text-shadow:0 0 16px rgba(251,191,36,.42);box-shadow:0 10px 24px rgba(245,158,11,.10),inset 0 1px 0 rgba(255,255,255,.12)}
+.metaLine{margin-top:6px;color:var(--muted);font-size:12px}
+.tagRow{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;justify-content:center}
+.tag{border:1px solid var(--line);border-radius:999px;padding:5px 9px;background:rgba(255,255,255,.06);color:#f3d9c0;font-size:12px;font-weight:750}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;justify-content:center}
+.brand{display:flex;flex-direction:column;gap:8px}
+.toolbar{margin:18px 0;padding:14px;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.045)),var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 18px 46px rgba(0,0,0,.20)}
+.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+@media(max-width:980px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){.cards{grid-template-columns:1fr}}
 @media(max-width:680px){body{padding:10px;font-size:13px}.top{flex-direction:column;align-items:flex-start;gap:12px}h1{font-size:18px}.headerActions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.headerActions .btn,.headerActions .badge{width:100%}}
 </style>
 <script>
@@ -671,8 +697,9 @@ SECURITY_HEADERS = {
 }
 
 
-def page(title, body, back=True):
+def page(title, body, back=True, logout=True):
     back_link = '<p class="muted"><a href="/">&larr; к списку роутеров</a></p>' if back else ""
+    logout_html = '<a class="btn" href="/logout">Выйти</a>' if logout else ""
     return f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -685,9 +712,12 @@ def page(title, body, back=True):
 <body>
 <main class="wrap">
   <section class="top">
-    <h1 class="appBanner"><span>NETCRAZE<b style="color:#ffb64d">·</b>REMOTE HUB</span></h1>
-    <div class="headerActions">
+    <div class="brand">
+      <h1 class="appBanner"><span>NETCRAZE<b style="color:#ffb64d">·</b>REMOTE HUB</span></h1>
       <a class="badge" href="https://github.com/beverlypillzz-collab/vodkinnet-rt" target="_blank" rel="noopener noreferrer">GitHub</a>
+    </div>
+    <div class="headerActions">
+      {logout_html}
     </div>
   </section>
   {back_link}
@@ -711,38 +741,64 @@ def login_page(error=""):
       </form>
     </div>
     """
-    return page("вход", body, back=False)
+    return page("вход", body, back=False, logout=False)
+
+
+def ru_plural(n, one, few, many):
+    n_abs = abs(n) % 100
+    n1 = n_abs % 10
+    if 11 <= n_abs <= 14:
+        return many
+    if n1 == 1:
+        return one
+    if 2 <= n1 <= 4:
+        return few
+    return many
 
 
 def dashboard_page(rows, csrf):
     cards = []
     for row in rows:
         online = (now_ts() - row["last_seen"]) < ONLINE_AFTER_SECONDS if row["last_seen"] else False
-        dot = "on" if online else "off"
-        status_text = "online" if online else ("никогда не выходил на связь" if not row["last_seen"] else "offline")
+        card_state = "" if online else " off"
+        status_html = (
+            '<span class="status"><i></i>Онлайн</span>' if online
+            else '<span class="status off"><i></i>' + ("Оффлайн" if row["last_seen"] else "Не выходил на связь") + '</span>'
+        )
+        svc_count = len(get_services(row["id"]))
+        svc_word = ru_plural(svc_count, "сервис", "сервиса", "сервисов")
+        last_seen_tag = (
+            f'<span class="tag">был на связи {time.strftime("%d.%m %H:%M", time.localtime(row["last_seen"]))}</span>'
+            if row["last_seen"] else ""
+        )
         cards.append(f"""
-        <div class="card">
-          <div class="row">
-            <div><span class="dot {dot}"></span><b>{html.escape(row["name"] or row["id"])}</b>
-              <span class="muted">({html.escape(row["id"])}) — {status_text}</span></div>
-            <div><a class="btn" href="/routers/{html.escape(row["id"])}">Открыть</a></div>
+        <div class="card{card_state}">
+          <div class="cardTop">
+            <div class="routerMark"><div class="routerIcon"><span></span></div></div>
+            {status_html}
+            <div class="name">{html.escape(row["name"] or row["id"])}</div>
+            <div class="metaLine">ID: {html.escape(row["id"])}</div>
+            <div class="tagRow">
+              <span class="tag">{svc_count} {svc_word}</span>
+              {last_seen_tag}
+            </div>
+            <div class="actions"><a class="btn primary" href="/routers/{html.escape(row["id"])}">Открыть</a></div>
           </div>
         </div>
         """)
-    cards_html = "\n".join(cards) if cards else '<p class="muted">Пока нет роутеров.</p>'
+    cards_html = f'<div class="cards">{"".join(cards)}</div>' if cards else '<p class="muted">Пока нет роутеров.</p>'
 
     body = f"""
-    <div class="card">
+    <div class="toolbar">
       <form method="post" action="/routers">
         <input type="hidden" name="csrf" value="{html.escape(csrf)}">
         <div class="row">
           <input type="text" name="name" placeholder="Название роутера, например: Netcraze GIGA (офис)" required style="flex:1; min-width:240px">
-          <button class="btn" type="submit">+ Добавить роутер</button>
+          <button class="btn primary" type="submit">+ Добавить роутер</button>
         </div>
       </form>
     </div>
     {cards_html}
-    <p class="muted"><a href="/logout">Выйти</a></p>
     """
     return page("роутеры", body, back=False)
 
