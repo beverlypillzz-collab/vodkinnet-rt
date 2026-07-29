@@ -1435,6 +1435,16 @@ def make_router_xray_config(row):
     }
 
 
+def _systemctl_restart_cmd(service):
+    # VodkinNET: если процесс запущен не от root (отдельный пользователь
+    # openwrt-remote), рестарт идёт через узкое sudoers-правило на один
+    # конкретный systemctl-вызов, не через полные права процесса.
+    cmd = ["systemctl", "restart", service]
+    if os.environ.get("OWRT_REMOTE_SUDO_RESTART", "1") != "0":
+        cmd = ["sudo", "-n"] + cmd
+    return cmd
+
+
 def reload_vps_xray(db_path=DB_PATH):
     out = Path(os.environ.get("OWRT_REMOTE_XRAY_CONFIG", "/etc/xray/owrt-remote.json"))
     service = os.environ.get("OWRT_REMOTE_XRAY_SERVICE", "owrt-remote-xray")
@@ -1449,7 +1459,7 @@ def reload_vps_xray(db_path=DB_PATH):
     except OSError:
         pass
     result = subprocess.run(
-        ["systemctl", "restart", service],
+        _systemctl_restart_cmd(service),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -1465,7 +1475,7 @@ def reload_vps_xray(db_path=DB_PATH):
 def restart_vps_xray():
     service = os.environ.get("OWRT_REMOTE_XRAY_SERVICE", "owrt-remote-xray")
     result = subprocess.run(
-        ["systemctl", "restart", service],
+        _systemctl_restart_cmd(service),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
