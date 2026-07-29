@@ -75,10 +75,6 @@ LOGIN_LOCKOUT_SECONDS = 300
 
 SERVICE_KINDS = ("http", "ssh", "tcp")
 
-BRAND_ORANGE = "#ff6a00"
-BRAND_RED = "#e01e1e"
-BRAND_BG = "#0a0603"
-
 _sessions_lock = threading.Lock()
 _login_lock = threading.Lock()
 _login_attempts = {}  # ip -> {"count": n, "first_ts": t, "locked_until": t}
@@ -605,44 +601,64 @@ def router_conf_text(row, services):
 
 
 # --------------------------------------------------------------------------
-# HTML
+# HTML — оформление один-в-один с owrt-remote (те же CSS-переменные, тот же
+# анимированный фон, карточки, кнопки — просто другой набор данных внутри)
 # --------------------------------------------------------------------------
 
-PAGE_CSS = f"""
+PAGE_CSS = """
 <style>
-  :root {{ --bg:{BRAND_BG}; --accent:{BRAND_ORANGE}; --accent2:{BRAND_RED}; }}
-  * {{ box-sizing: border-box; }}
-  body {{ background:var(--bg); color:#f2ece4; font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin:0; padding:24px; }}
-  a {{ color:var(--accent); }}
-  h1 {{ font-size:20px; margin:0 0 18px; }}
-  h3 {{ font-size:15px; }}
-  .card {{ background:#15100c; border:1px solid #2a221a; border-radius:10px; padding:16px 18px; margin-bottom:14px; }}
-  .row {{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }}
-  .dot {{ width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:8px; }}
-  .on {{ background:#22c55e; }}
-  .off {{ background:#6b7280; }}
-  .btn {{ background:var(--accent); color:#150c05; border:none; padding:8px 14px; border-radius:6px; cursor:pointer; font-weight:600; text-decoration:none; display:inline-block; font-size:13px; }}
-  .btn.danger {{ background:var(--accent2); color:#fff; }}
-  .btn.ghost {{ background:transparent; border:1px solid #3a2f22; color:#f2ece4; }}
-  .btn.small {{ padding:4px 9px; font-size:12px; }}
-  input[type=text], input[type=password], select {{ background:#0f0b08; border:1px solid #3a2f22; color:#fff; padding:8px 10px; border-radius:6px; }}
-  pre {{ background:#0f0b08; border:1px solid #3a2f22; border-radius:8px; padding:12px; overflow-x:auto; font-size:12.5px; position:relative; }}
-  .copybtn {{ position:absolute; top:8px; right:8px; }}
-  form {{ margin:0; }}
-  .muted {{ color:#a89a86; font-size:13px; }}
-  code {{ color:var(--accent); }}
-  .kindtag {{ font-size:11px; padding:2px 6px; border-radius:4px; background:#241a10; color:#e0a26a; margin-left:6px; }}
-  .svc-grid {{ display:grid; gap:10px; }}
+:root{color-scheme:dark;--bg:#0a0603;--panel:rgba(19,14,32,.9);--panel2:rgba(255,255,255,.07);--text:#f7f2ff;--muted:#b9adc9;--line:rgba(169,126,255,.28);--blue:#ff6a00;--cyan:#ff9a3c;--red:#fb7185;--green:#22c55e;--amber:#f59e0b;--grid:rgba(255,106,0,.13)}
+*{box-sizing:border-box}
+body{position:relative;min-height:100vh;margin:0;overflow-x:hidden;background-color:var(--bg);background-image:radial-gradient(circle at 12% 8%,rgba(255,106,0,.46),transparent 31%),radial-gradient(circle at 82% 12%,rgba(224,30,30,.38),transparent 30%),radial-gradient(circle at 50% 105%,rgba(224,30,30,.26),transparent 35%),linear-gradient(145deg,#0a0603,#12080a 48%,#070302),repeating-linear-gradient(0deg,transparent 0 30px,var(--grid) 31px),repeating-linear-gradient(90deg,transparent 0 30px,var(--grid) 31px);background-size:130% 130%,140% 140%,135% 135%,100% 100%,31px 31px,31px 31px;background-attachment:fixed;color:var(--text);font:14px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;animation:bgFlow 28s ease-in-out infinite alternate;padding:18px}
+body::before{content:"";position:fixed;inset:-25%;z-index:0;pointer-events:none;background:conic-gradient(from 0deg at 50% 50%,rgba(255,106,0,.05),rgba(224,30,30,.34),rgba(255,154,60,.22),rgba(245,158,11,.13),rgba(255,106,0,.05));filter:blur(54px);opacity:.7;animation:auraSpin 38s linear infinite}
+@keyframes bgFlow{0%{background-position:0% 0%,100% 0%,50% 100%,0 0,0 0,0 0}50%{background-position:28% 18%,62% 26%,38% 82%,0 0,15px 24px,24px 15px}100%{background-position:48% 28%,42% 42%,74% 62%,0 0,30px 0,0 30px}}
+@keyframes auraSpin{from{transform:rotate(0deg) scale(1)}to{transform:rotate(360deg) scale(1.08)}}
+@keyframes bannerShine{0%,45%{transform:translateX(-120%)}72%,100%{transform:translateX(120%)}}
+@keyframes statusPulse{0%,100%{transform:scale(1);opacity:.75}50%{transform:scale(1.45);opacity:1}}
+@keyframes offlinePulse{0%,100%{transform:scale(1);opacity:.5}50%{transform:scale(1.42);opacity:1}}
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto}
+.top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:6px 0 22px}
+h1{margin:0;font-size:22px;line-height:1.2}
+.appBanner{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:9px 18px;border:1px solid rgba(255,154,60,.38);border-radius:8px;background:linear-gradient(110deg,rgba(255,154,60,.14),rgba(224,80,0,.24),rgba(224,30,30,.14));color:#fff2e8;font-weight:800;font-size:16px;line-height:1;white-space:nowrap;box-shadow:0 10px 24px rgba(224,80,0,.16),inset 0 1px 0 rgba(255,255,255,.10);overflow:hidden}
+.appBanner::before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.20),transparent);transform:translateX(-120%);animation:bannerShine 6.2s ease-in-out infinite}
+.appBanner span{position:relative}
+.muted{color:var(--muted)}
+.headerActions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+input,select{min-width:0;border:1px solid var(--line);border-radius:8px;padding:10px 11px;background:rgba(8,5,18,.72);color:var(--text)}
+input::placeholder{color:#b9adc9}
+input:focus,select:focus{outline:none;border-color:rgba(255,154,60,.62);box-shadow:0 0 0 3px rgba(255,154,60,.12)}
+button,.btn{border:1px solid rgba(255,255,255,.10);border-radius:8px;padding:9px 14px;background:rgba(255,255,255,.10);color:#f7f2ff;font-weight:800;text-decoration:none;cursor:pointer;display:inline-flex;justify-content:center;align-items:center;font-size:13px}
+button:hover,.btn:hover{border-color:rgba(255,154,60,.52);background:rgba(255,255,255,.14)}
+.btn.primary,button.primary{background:linear-gradient(135deg,#ff6a00,#e01e1e);color:#fff;border-color:rgba(255,255,255,.12);box-shadow:0 10px 22px rgba(224,80,0,.22)}
+.btn.bad,button.bad{background:rgba(251,113,133,.16);color:#fecdd3}
+.btn.good{background:rgba(34,197,94,.16);color:#bbf7d0}
+.btn.small{padding:5px 10px;font-size:12px}
+.badge{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:999px;padding:7px 12px;background:rgba(255,255,255,.08);color:#fff2e8;font-weight:800;font-size:12px}
+.dot{width:9px;height:9px;border-radius:999px;background:var(--red);box-shadow:0 0 13px rgba(251,113,133,.72);display:inline-block}
+.dot.on{background:var(--green);box-shadow:0 0 13px rgba(34,197,94,.75);animation:statusPulse 1.8s ease-in-out infinite}
+.dot.off{animation:offlinePulse 1.9s ease-in-out infinite}
+.card{position:relative;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.045)),var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px 18px;margin-bottom:14px;box-shadow:0 18px 46px rgba(0,0,0,.24);backdrop-filter:blur(10px)}
+.card::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--green)}
+.card.off::before{background:var(--red)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+form{margin:0}
+code{background:rgba(255,255,255,.10);border-radius:6px;padding:2px 5px;color:#fff2e8}
+pre{background:rgba(0,0,0,.32);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;font:12.5px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;color:#f3d9c0;position:relative}
+.copybtn{position:absolute;top:8px;right:8px}
+.kindtag{font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.08);color:#f3d9c0;margin-left:8px;border:1px solid var(--line)}
+.svc-grid{display:grid;gap:12px}
+a{color:var(--cyan)}
+@media(max-width:680px){body{padding:10px;font-size:13px}.top{flex-direction:column;align-items:flex-start;gap:12px}h1{font-size:18px}.headerActions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.headerActions .btn,.headerActions .badge{width:100%}}
 </style>
 <script>
-function ncrCopy(id) {{
+function ncrCopy(id) {
   var el = document.getElementById(id);
   if (!el) return;
-  navigator.clipboard.writeText(el.innerText).then(function() {{
+  navigator.clipboard.writeText(el.innerText).then(function() {
     var btn = document.getElementById('copy-' + id);
-    if (btn) {{ var old = btn.innerText; btn.innerText = 'Скопировано'; setTimeout(function(){{ btn.innerText = old; }}, 1500); }}
-  }});
-}}
+    if (btn) { var old = btn.innerText; btn.innerText = 'Скопировано'; setTimeout(function(){ btn.innerText = old; }, 1500); }
+  });
+}
 </script>
 """
 
@@ -656,21 +672,42 @@ SECURITY_HEADERS = {
 
 
 def page(title, body, back=True):
-    back_link = '<p><a href="/">&larr; к списку роутеров</a></p>' if back else ""
-    return f"""<!doctype html><html><head><meta charset="utf-8">
-<title>{html.escape(title)} — netcraze-remote</title>{PAGE_CSS}</head>
-<body><h1>netcraze-remote — {html.escape(title)}</h1>{back_link}{body}</body></html>"""
+    back_link = '<p class="muted"><a href="/">&larr; к списку роутеров</a></p>' if back else ""
+    return f"""<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#ff6a00">
+<title>{html.escape(title)} — netcraze-remote</title>
+{PAGE_CSS}
+</head>
+<body>
+<main class="wrap">
+  <section class="top">
+    <h1 class="appBanner"><span>NETCRAZE<b style="color:#ffb64d">·</b>REMOTE HUB</span></h1>
+    <div class="headerActions">
+      <a class="badge" href="https://github.com/beverlypillzz-collab/vodkinnet-rt" target="_blank" rel="noopener noreferrer">GitHub</a>
+    </div>
+  </section>
+  {back_link}
+  {body}
+</main>
+</body>
+</html>"""
 
 
 def login_page(error=""):
-    err_html = f'<p style="color:{BRAND_RED}">{html.escape(error)}</p>' if error else ""
+    err_html = f'<div class="card" style="border-color:rgba(251,113,133,.45);background:rgba(251,113,133,.10);color:#fecdd3">{html.escape(error)}</div>' if error else ""
     body = f"""
-    <div class="card" style="max-width:360px">
+    <div class="card" style="max-width:360px;margin:40px auto 0">
       {err_html}
       <form method="post" action="/login">
-        <p><input type="text" name="username" placeholder="логин" required></p>
-        <p><input type="password" name="password" placeholder="пароль" required></p>
-        <button class="btn" type="submit">Войти</button>
+        <label class="muted" style="display:block;margin:8px 0 4px">Логин</label>
+        <input type="text" name="username" autocomplete="username" autofocus required style="width:100%">
+        <label class="muted" style="display:block;margin:12px 0 4px">Пароль</label>
+        <input type="password" name="password" autocomplete="current-password" required style="width:100%">
+        <button class="primary" type="submit" style="width:100%;margin-top:16px">Войти</button>
       </form>
     </div>
     """
@@ -729,11 +766,11 @@ def service_commands_html(row_id, svc, ssh_hint_user, ssh_hint_port, vps_host):
         <div>
           <form method="post" action="/routers/{html.escape(row_id)}/services/{svc['id']}/rotate" style="display:inline" onsubmit="return confirm('Перевыпустить секрет для {html.escape(svc['label'])}? Понадобится обновить конфиг на роутере.');">
             <input type="hidden" name="csrf" value="{{csrf}}">
-            <button class="btn ghost small" type="submit">Перевыпустить секрет</button>
+            <button class="btn small" type="submit">Перевыпустить секрет</button>
           </form>
           <form method="post" action="/routers/{html.escape(row_id)}/services/{svc['id']}/delete" style="display:inline" onsubmit="return confirm('Удалить сервис {html.escape(svc['label'])}?');">
             <input type="hidden" name="csrf" value="{{csrf}}">
-            <button class="btn danger small" type="submit">Удалить</button>
+            <button class="btn bad small" type="submit">Удалить</button>
           </form>
         </div>
       </div>
@@ -789,7 +826,7 @@ def router_detail_page(row, services, vps_public_host, ssh_hint_user, ssh_hint_p
       {"<p class='muted'>" + html.escape(json.dumps(last_info, ensure_ascii=False)) + "</p>" if last_info else ""}
       <form method="post" action="/routers/{html.escape(row['id'])}/rotate-token" onsubmit="return confirm('Перевыпустить HUB_TOKEN? Реверс-туннель не порвётся, но конфиг на роутере надо будет обновить.');" style="display:inline">
         <input type="hidden" name="csrf" value="{html.escape(csrf)}">
-        <button class="btn ghost small" type="submit">Перевыпустить HUB_TOKEN</button>
+        <button class="btn small" type="submit">Перевыпустить HUB_TOKEN</button>
       </form>
     </div>
 
@@ -811,7 +848,7 @@ def router_detail_page(row, services, vps_public_host, ssh_hint_user, ssh_hint_p
     <div class="card">
       <form method="post" action="/routers/{html.escape(row['id'])}/delete" onsubmit="return confirm('Удалить роутер {html.escape(row['id'])} со всеми его сервисами?');">
         <input type="hidden" name="csrf" value="{html.escape(csrf)}">
-        <button class="btn danger" type="submit">Удалить роутер целиком</button>
+        <button class="btn bad" type="submit">Удалить роутер целиком</button>
       </form>
     </div>
     """
