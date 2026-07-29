@@ -229,18 +229,24 @@ EOF
 chmod 640 "$ENV_FILE"
 chown root:"$SVC_USER" "$ENV_FILE"
 
-# пароль передаём через переменную окружения дочернему процессу, а не argv —
-# не остаётся в `ps aux`/shell-истории этой сессии. ВАЖНО: sudo по умолчанию
-# сбрасывает окружение — переменные нужно объявлять ПОСЛЕ "sudo -u ... env",
-# объявление перед sudo (env NAME=val sudo ...) до дочернего процесса не доходит.
+# VodkinNET: у портированного Hub'а (owrt-remote CLI) нет команды
+# set-admin-password с опциональным паролем — есть set-login, но там оба
+# флага (--username/--password) ОБЯЗАТЕЛЬНЫ, а значит пароль обязательно
+# светился бы в `ps aux`/истории. Вместо этого пользуемся тем, что
+# load_auth() сама лениво создаёт логин из NETCRAZE_REMOTE_ADMIN_USER/
+# NETCRAZE_REMOTE_ADMIN_PASSWORD (уже в hub.env) при первом обращении —
+# просто дёргаем "init", который её вызывает, без пароля в argv вообще.
 sudo -u "$SVC_USER" env \
 	NETCRAZE_REMOTE_STATE_DIR="$STATE_DIR" \
+	NETCRAZE_REMOTE_ADMIN_USER="$ADMIN_USER" \
 	NETCRAZE_REMOTE_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
-	python3 "${INSTALL_DIR}/netcraze-remote-hub.py" set-admin-password "$ADMIN_USER"
+	python3 "${INSTALL_DIR}/netcraze-remote-hub.py" --db "${STATE_DIR}/hub.db" init
 
-# shellcheck disable=SC2046
-sudo -u "$SVC_USER" env $(grep -v '^#' "$ENV_FILE" | xargs) NETCRAZE_REMOTE_SKIP_RESTART=1 \
-	python3 "${INSTALL_DIR}/netcraze-remote-hub.py" regen-xray
+# render-xray просто пишет файл конфига, ничего не рестартует — на этом
+# бутстрап-этапе (до sudoers/systemd-юнита) рестарт и не нужен вообще.
+sudo -u "$SVC_USER" \
+	python3 "${INSTALL_DIR}/netcraze-remote-hub.py" --db "${STATE_DIR}/hub.db" \
+	render-xray --listen-port "$VLESS_PORT" --out "$XRAY_CONFIG"
 
 # --- sudoers: узкое правило, только рестарт netcraze-remote-xray ---
 SYSTEMCTL_PATH="$(command -v systemctl || echo /usr/bin/systemctl)"
@@ -330,6 +336,14 @@ cat <<EOF
 
   VLESS-порт реверс-канала: ${VLESS_PORT} (открой в firewall провайдера, если не ufw)
 
-Дальше: зайди в панель -> "Добавить роутер" -> скопируй блок конфига в
-/opt/etc/netcraze-remote/netcraze-remote.conf на Keenetic и запусти агент.
+Дальше:
+  1. Зайди в панель -> "+ Добавить роутер" -> заполни ID/имя/роль и
+     ENTRY PORT (свободный порт на этом VPS, например 18140 - панель
+     подскажет, если порт уже занят другим роутером).
+  2. Нажми "Обновить Xray CFG", затем "Рестарт Xray VPS" (это НЕ
+     происходит автоматически при добавлении роутера - нужно руками
+     после каждого изменения списка роутеров).
+  3. Открой "Конфиг" в карточке роутера -> вставь текст целиком в
+     /opt/etc/netcraze-remote/netcraze-remote.conf на Keenetic и запусти
+     агент (/opt/etc/init.d/S99netcraze-remote start).
 EOF
