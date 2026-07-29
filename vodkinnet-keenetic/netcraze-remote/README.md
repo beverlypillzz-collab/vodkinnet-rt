@@ -157,12 +157,8 @@ PURGE=1 sh uninstall.sh
 ### Hub (VPS)
 
 ```sh
-wget -O uninstall.sh "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/uninstall.sh"
-sh uninstall.sh
-```
-
-```sh
-sudo sh vps/uninstall-vps.sh
+wget -O uninstall-vps.sh "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/vps/uninstall-vps.sh"
+sudo sh uninstall-vps.sh
 ```
 
 Останавливает и удаляет оба systemd-юнита, sudoers-правило, certbot
@@ -172,13 +168,13 @@ deploy-hook, nginx-vhost, бинарь Hub-скрипта. По умолчани
 а не насовсем сносишь. Флаги:
 
 ```sh
-PURGE=1 sudo sh vps/uninstall-vps.sh          # + стереть базу роутеров/логины
-REMOVE_XRAY=1 sudo sh vps/uninstall-vps.sh    # + удалить бинарь Xray
-REMOVE_USER=1 sudo sh vps/uninstall-vps.sh    # + удалить системного пользователя netcraze-remote
+PURGE=1 sudo sh uninstall-vps.sh          # + стереть базу роутеров/логины
+REMOVE_XRAY=1 sudo sh uninstall-vps.sh    # + удалить бинарь Xray
+REMOVE_USER=1 sudo sh uninstall-vps.sh    # + удалить системного пользователя netcraze-remote
 ```
 
 Все три флага можно комбинировать (например
-`PURGE=1 REMOVE_XRAY=1 REMOVE_USER=1 sudo sh vps/uninstall-vps.sh` —
+`PURGE=1 REMOVE_XRAY=1 REMOVE_USER=1 sudo sh uninstall-vps.sh` —
 полная зачистка без следа). Сертификат Let's Encrypt при этом **не**
 удаляется — если домен общий с другой панелью (см. секцию про общий
 домен ниже), трогать его руками отдельно от netcraze-remote не нужно.
