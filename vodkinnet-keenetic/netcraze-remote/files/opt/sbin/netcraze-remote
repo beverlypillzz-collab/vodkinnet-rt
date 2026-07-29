@@ -743,7 +743,7 @@ doctor() {
 	# Живая проверка: реально ли запускается xray с текущим конфигом
 	# (полезно поймать ошибку JSON/бинаря ДО попытки полноценного старта)
 	if xray_bin_path >/dev/null 2>&1 && [ -n "$(conf_get VLESS_UUID '')" ]; then
-		local test_config test_bin test_out
+		local test_config test_bin test_out test_rc
 		test_bin="$(xray_bin_path)"
 		test_config="$(render_client_config --stdout 2>/dev/null | tee "${TMPDIR:-/opt/tmp}/ncr-doctor-test.json" 2>/dev/null)"
 		if command -v python3 >/dev/null 2>&1; then
@@ -755,12 +755,24 @@ doctor() {
 				ok_all=0
 			fi
 		fi
-		test_out="$("$test_bin" -test -config "${TMPDIR:-/opt/tmp}/ncr-doctor-test.json" 2>&1 || "$test_bin" run -test -config "${TMPDIR:-/opt/tmp}/ncr-doctor-test.json" 2>&1)"
-		if printf '%s' "$test_out" | grep -qi "error\|failed\|panic"; then
-			printf '%b[!!]%b xray не принял конфиг (тестовый прогон):\n%s\n' "$C_RED" "$C_NC" "$test_out"
-			ok_all=0
-		else
+		# VodkinNET: проверяем КОД ВОЗВРАТА, а не текст вывода — xray сам
+		# пишет служебные строки вида "common/errors: ..." даже для
+		# обычных warning'ов (это имя внутреннего Go-пакета, не признак
+		# сбоя), и грубый grep по слову "error" ложно матчил такие строки
+		# при полностью успешной проверке ("Configuration OK."). Найдено
+		# на реальном устройстве — Xray принял конфиг, но doctor всё
+		# равно рапортовал о проблеме.
+		test_out="$("$test_bin" -test -config "${TMPDIR:-/opt/tmp}/ncr-doctor-test.json" 2>&1)"
+		test_rc=$?
+		if [ "$test_rc" -ne 0 ]; then
+			test_out="$("$test_bin" run -test -config "${TMPDIR:-/opt/tmp}/ncr-doctor-test.json" 2>&1)"
+			test_rc=$?
+		fi
+		if [ "$test_rc" -eq 0 ]; then
 			ok "xray принял тестовый конфиг (-test) без ошибок"
+		else
+			printf '%b[!!]%b xray не принял конфиг (тестовый прогон, код возврата %s):\n%s\n' "$C_RED" "$C_NC" "$test_rc" "$test_out"
+			ok_all=0
 		fi
 		rm -f "${TMPDIR:-/opt/tmp}/ncr-doctor-test.json"
 	fi
