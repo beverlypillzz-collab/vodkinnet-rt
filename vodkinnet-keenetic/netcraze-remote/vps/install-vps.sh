@@ -61,6 +61,12 @@ info "IP/домен VPS (для этой панели, ОТДЕЛЬНО от д�
 read -r HUB_DOMAIN
 [ -n "$HUB_DOMAIN" ] || HUB_DOMAIN="$(curl -fsS ifconfig.me || hostname -I | awk '{print $1}')"
 
+info "Внешний HTTPS-порт для этой панели (Enter = 443). Если этот же домен уже
+обслуживает другую панель (например owrt-remote) на 443 - укажи другой
+порт, один и тот же сертификат домена спокойно обслуживает разные порты:"
+read -r EXTERNAL_HTTPS_PORT
+[ -n "$EXTERNAL_HTTPS_PORT" ] || EXTERNAL_HTTPS_PORT=443
+
 VLESS_PORT="${NETCRAZE_REMOTE_VLESS_PORT:-8444}"
 HUB_PORT="${NETCRAZE_REMOTE_HUB_PORT:-8099}"
 
@@ -142,6 +148,8 @@ if [ ! -f "/etc/letsencrypt/live/${HUB_DOMAIN}/fullchain.pem" ]; then
 	certbot certonly --standalone -d "$HUB_DOMAIN" --agree-tos -m "admin@${HUB_DOMAIN}" --non-interactive || \
 		info "certbot не смог получить сертификат автоматически — сделай позже вручную и укажи пути ниже"
 	systemctl start nginx 2>/dev/null || true
+else
+	ok "сертификат для ${HUB_DOMAIN} уже существует (видимо от другой панели на этом же домене) - переиспользую, новый не запрашиваю"
 fi
 
 CERT_PATH="/etc/letsencrypt/live/${HUB_DOMAIN}/fullchain.pem"
@@ -220,15 +228,27 @@ systemctl daemon-reload
 systemctl enable --now netcraze-remote-xray
 systemctl enable --now netcraze-remote-hub
 
-# --- nginx vhost (отдельный файл, отдельный домен) ---
-cat > "/etc/nginx/sites-available/netcraze-remote" <<EOF
-server {
+# --- nginx vhost (отдельный файл; порт 80-редирект добавляем только если
+# внешний порт для этой панели - 443, иначе на этом домене уже наверняка
+# есть свой редирект-блок 80->443 от другой панели, и второй такой же блок
+# для того же server_name будет конфликтовать) ---
+if [ "$EXTERNAL_HTTPS_PORT" = "443" ]; then
+	PORT80_BLOCK="server {
     listen 80;
     server_name ${HUB_DOMAIN};
     return 301 https://\$host\$request_uri;
-}
+}"
+else
+	PORT80_BLOCK="# внешний порт этой панели = ${EXTERNAL_HTTPS_PORT} (не 443) -
+# редирект с 80 порта для ${HUB_DOMAIN} сюда не добавляем: домен, скорее
+# всего, уже обслуживается другой панелью на 443/80, свой редирект-блок
+# 80->443 для того же server_name создал бы конфликт в nginx."
+fi
+
+cat > "/etc/nginx/sites-available/netcraze-remote" <<EOF
+${PORT80_BLOCK}
 server {
-    listen 443 ssl;
+    listen ${EXTERNAL_HTTPS_PORT} ssl;
     server_name ${HUB_DOMAIN};
 
     ssl_certificate     ${CERT_PATH};
@@ -250,14 +270,20 @@ nginx -t && systemctl reload nginx
 if command -v ufw >/dev/null 2>&1; then
 	ufw allow "${VLESS_PORT}/tcp" || true
 	ufw allow 80/tcp || true
-	ufw allow 443/tcp || true
+	ufw allow "${EXTERNAL_HTTPS_PORT}/tcp" || true
+fi
+
+if [ "$EXTERNAL_HTTPS_PORT" = "443" ]; then
+	PANEL_URL="https://${HUB_DOMAIN}/"
+else
+	PANEL_URL="https://${HUB_DOMAIN}:${EXTERNAL_HTTPS_PORT}/"
 fi
 
 echo
 ok "Установка Hub завершена (процессы работают от пользователя ${SVC_USER}, не root)."
 cat <<EOF
 
-  URL панели : https://${HUB_DOMAIN}/
+  URL панели : ${PANEL_URL}
   Логин      : ${ADMIN_USER}
   Пароль     : ${ADMIN_PASSWORD}
   (пароль показывается один раз, смени его при первом входе)
