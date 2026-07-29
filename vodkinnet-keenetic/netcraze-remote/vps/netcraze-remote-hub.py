@@ -33,7 +33,7 @@ except Exception:
 
 
 APP_NAME = "VodkinNet RT Hub"
-RAW_REPO_BASE = "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-netcraze-remote"
+RAW_REPO_BASE = "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote"
 STATE_DIR = Path(os.environ.get("NETCRAZE_REMOTE_STATE_DIR", "/var/lib/netcraze-remote"))
 DB_PATH = Path(os.environ.get("NETCRAZE_REMOTE_DB", str(STATE_DIR / "hub.db")))
 AUTH_FILE = STATE_DIR / "hub-auth.json"
@@ -1435,6 +1435,17 @@ def make_router_xray_config(row):
     }
 
 
+def _systemctl_restart_cmd(service):
+    # VodkinNET: Hub-процесс работает НЕ от root (см. install-vps.sh —
+    # отдельный системный пользователь). Единственное root-действие —
+    # рестарт netcraze-remote-xray — идёт через узкое sudoers-правило на
+    # один конкретный systemctl-вызов, а не через полные права процесса.
+    cmd = ["systemctl", "restart", service]
+    if os.environ.get("NETCRAZE_REMOTE_SUDO_RESTART", "1") != "0":
+        cmd = ["sudo", "-n"] + cmd
+    return cmd
+
+
 def reload_vps_xray(db_path=DB_PATH):
     out = Path(os.environ.get("NETCRAZE_REMOTE_XRAY_CONFIG", "/etc/netcraze-remote/xray.json"))
     service = os.environ.get("NETCRAZE_REMOTE_XRAY_SERVICE", "netcraze-remote-xray")
@@ -1449,7 +1460,7 @@ def reload_vps_xray(db_path=DB_PATH):
     except OSError:
         pass
     result = subprocess.run(
-        ["systemctl", "restart", service],
+        _systemctl_restart_cmd(service),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -1465,7 +1476,7 @@ def reload_vps_xray(db_path=DB_PATH):
 def restart_vps_xray():
     service = os.environ.get("NETCRAZE_REMOTE_XRAY_SERVICE", "netcraze-remote-xray")
     result = subprocess.run(
-        ["systemctl", "restart", service],
+        _systemctl_restart_cmd(service),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -1604,7 +1615,7 @@ def vps_terminal_commands(host):
         {
             "title": "Обновить Hub",
             "note": "Свежий hub.py из main + restart сервиса",
-            "command": f'v=$(date +%s); curl -fsSL -o /opt/netcraze-remote/netcraze-remote-hub.py "{RAW_REPO_BASE}/vps/netcraze-remote-hub.py?v=$v" && chmod +x /opt/netcraze-remote/netcraze-remote-hub.py && systemctl restart netcraze-remote && systemctl status netcraze-remote --no-pager -l',
+            "command": f'v=$(date +%s); curl -fsSL -o /opt/netcraze-remote/netcraze-remote-hub.py "{RAW_REPO_BASE}/vps/netcraze-remote-hub.py?v=$v" && chmod +x /opt/netcraze-remote/netcraze-remote-hub.py && systemctl restart netcraze-remote-hub && systemctl status netcraze-remote-hub --no-pager -l',
         },
         {
             "title": "Статус Hub",
@@ -1833,7 +1844,7 @@ input,select{{min-width:0;border:1px solid var(--line);border-radius:8px;padding
       <div class="brandPanel">
         <h1 class="appBanner"><span>NETCRAZE<b style="color:#2f8fff">·</b>RT HUB</span></h1>
         <div class="links">
-          <a href="https://github.com/beverlypillzz-collab/Vodkinnet-RT" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href="https://github.com/beverlypillzz-collab/vodkinnet-rt" target="_blank" rel="noopener noreferrer">GitHub</a>
         </div>
       </div>
     </div>
