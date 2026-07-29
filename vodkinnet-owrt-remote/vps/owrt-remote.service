@@ -7,7 +7,10 @@ Wants=network-online.target
 Type=simple
 Environment=OWRT_REMOTE_BIND=0.0.0.0
 Environment=OWRT_REMOTE_PORT=8088
-Environment=OWRT_REMOTE_EXTRA_PORTS=80
+# VodkinNET: EXTRA_PORTS=80 убран — конфликтовал с nginx-редиректом
+# vodkin.net (лендинг), который тоже слушает 80 на этом сервере. Раньше
+# это уже фиксили через drop-in, но сам файл юнита в репозитории не был
+# обновлён — при следующем полном redeploy регрессия вернулась бы снова.
 Environment=OWRT_REMOTE_STATE_DIR=/var/lib/owrt-remote
 Environment=OWRT_REMOTE_SUDO_RESTART=1
 ExecStart=/opt/owrt-remote/owrt-remote-run.sh serve
