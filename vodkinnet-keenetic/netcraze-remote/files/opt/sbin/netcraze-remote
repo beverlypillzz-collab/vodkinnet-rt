@@ -1,28 +1,27 @@
 #!/bin/sh
 # netcraze-remote — агент реверс-туннеля для Keenetic/KNDMS (Entware).
-# Форк идеи vodkinnet-owrt-remote, но БЕЗ uci/procd/LuCI — под BusyBox ash
-# на Entware. Конфиг — обычный shell-совместимый key=value файл.
 #
-# v2: произвольный список сервисов (SERVICE_1_*, SERVICE_2_*, ...) вместо
-# жёсткой пары admin+ssh — на KNDMS SSH-поверхностей может быть больше
-# одной (SSH самой NDMS и отдельный sshd/dropbear, поставленный через
-# opkg внутри Entware — это РАЗНЫЕ сервисы). Плюс: functional-проверка
-# Entware перед любым действием (entware_ok), и watchdog в heartbeat-loop,
-# который сам поднимет упавший xray (без него после падения процесса
-# зайти было бы физически некуда — тоннель и есть канал доступа).
+# v3: точный порт vodkinnet-owrt-remote (та же схема полей admin_*/ssh_*,
+# тот же механизм детекта Xray через /proc, те же метрики RAM/Flash/
+# Температура/Нагрузка, отдаваемые в heartbeat — панель Hub ждёт ИМЕННО
+# эти имена полей и рендерит для них готовые карточки/метрики без правок).
+# Отличается только тем, что обязано отличаться из-за ОС: конфиг —
+# обычный shell key="value" файл вместо uci (на KNDMS uci нет), плюс
+# Keenetic-специфичные добавки: entware_ok() (функциональная проверка
+# Entware, не просто "opkg есть в PATH"), generic-пробы модели/LAN-IP без
+# привязки к конкретной сборке, самовосстанавливающийся watchdog.
 
 export PATH="/opt/sbin:/opt/bin:/bin:/sbin:/usr/bin:/usr/sbin:${PATH:-}"
 
 CONF="/opt/etc/netcraze-remote/netcraze-remote.conf"
 STATE_DIR="/opt/var/run/netcraze-remote"
-PID_XRAY="$STATE_DIR/xray.pid"
 PID_HB="$STATE_DIR/heartbeat.pid"
 LOG_FILE="/opt/var/log/netcraze-remote.log"
 
 if [ -t 1 ]; then
-	C_RED='\033[0;31m'; C_GREEN='\033[0;32m'; C_YELLOW='\033[1;33m'; C_CYAN='\033[0;36m'; C_NC='\033[0m'
+	C_RED='\033[0;31m'; C_GREEN='\033[0;32m'; C_YELLOW='\033[1;33m'; C_NC='\033[0m'
 else
-	C_RED=''; C_GREEN=''; C_YELLOW=''; C_CYAN=''; C_NC=''
+	C_RED=''; C_GREEN=''; C_YELLOW=''; C_NC=''
 fi
 
 log()  { printf '%s\n' "$*" >&2; }
@@ -54,9 +53,6 @@ entware_ok() {
 	[ -x /opt/bin/opkg ] || return 1
 	[ -f /opt/etc/opkg.conf ] || return 1
 	opkg --version >/dev/null 2>&1 || return 1
-	# Защита от "флешка физически отключилась после старта": если /opt
-	# внезапно оказался на том же устройстве, что и корень — это не
-	# отдельно смонтированная Entware-флешка, а пустая директория на rootfs.
 	if command -v stat >/dev/null 2>&1; then
 		root_dev="$(stat -c %d / 2>/dev/null)"
 		opt_dev="$(stat -c %d /opt 2>/dev/null)"
@@ -71,14 +67,13 @@ require_entware() {
 	entware_ok || die "Entware не найден или не работает по-настоящему (opkg/opkg.conf/точка монтирования /opt) — см. netcraze_vpn_setup_summary.md про баг 'disk is unchanged'"
 }
 
-# --- конфиг: обычный key="value" файл, читаем через sed, пишем через sed --
+# --- конфиг: обычный key="value" файл (на KNDMS нет uci) ------------------
 
 need_conf() {
 	[ -f "$CONF" ] || die "конфиг не найден: $CONF (см. $CONF.example)"
 }
 
 conf_get() {
-	# conf_get KEY DEFAULT
 	local key="$1" default="$2" val
 	need_conf
 	val="$(sed -n "s/^${key}=\"\{0,1\}\([^\"]*\)\"\{0,1\}[[:space:]]*\$/\1/p" "$CONF" | tail -n1)"
@@ -86,7 +81,6 @@ conf_get() {
 }
 
 conf_set() {
-	# conf_set KEY VALUE — обновляет строку KEY="VALUE" в конфиге (in-place)
 	local key="$1" value="$2"
 	need_conf
 	if grep -q "^${key}=" "$CONF"; then
@@ -96,11 +90,8 @@ conf_set() {
 	fi
 }
 
-conf_del_prefix() {
-	# conf_del_prefix PREFIX — удаляет все строки KEY=... начинающиеся с PREFIX
-	local prefix="$1"
-	need_conf
-	sed -i "/^${prefix}/d" "$CONF"
+truthy() {
+	case "$1" in 1|yes|true|on|Yes|True|On|YES|TRUE|ON) return 0 ;; *) return 1 ;; esac
 }
 
 json_escape() {
@@ -115,13 +106,155 @@ safe_id() {
 	printf '%s' "$1" | tr -c 'a-zA-Z0-9_-' '-'
 }
 
-# --- поиск / установка xray ---------------------------------------------
+safe_num() {
+	case "$2" in ''|*[!0-9]*) : ;; *) : ;; esac
+	case "$1" in
+		''|*[!0-9]*) printf '%s' "${2:-0}" ;;
+		*) printf '%s' "$1" ;;
+	esac
+}
 
-# VodkinNET: на этом устройстве Xray-core УЖЕ стоит и работает для XKeen
-# (см. netcraze_vpn_setup_summary.md). netcraze-remote НЕ трогает конфиг
-# XKeen (/opt/etc/xray/configs/*.json) и не использует общий процесс —
-# запускается отдельным процессом со своим -config, чтобы падение или
-# рестарт одного не задевал другой.
+# --- generic-детекты устройства (без привязки к конкретной сборке/модели) --
+
+lan_ip_default() {
+	local ip iface
+	for iface in $(ip -o -4 addr show 2>/dev/null | awk '{print $2}'); do
+		case "$iface" in
+			lo|ppp*|wan*|pppoe*|tun*|tap*|docker*|veth*) continue ;;
+		esac
+		ip="$(ip -4 addr show "$iface" 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -n1)"
+		case "$ip" in
+			10.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|192.168.*)
+				printf '%s' "$ip"
+				return 0
+				;;
+		esac
+	done
+	ip="$(ip -4 addr show 2>/dev/null | awk '/inet /{print $2}' | grep -v '^127\.' | head -n1 | cut -d/ -f1)"
+	[ -n "$ip" ] && printf '%s' "$ip" || printf '127.0.0.1'
+}
+
+host_model() {
+	if [ -r /proc/sys/kernel/ndm_model_name ]; then
+		cat /proc/sys/kernel/ndm_model_name 2>/dev/null && return
+	fi
+	if command -v ndmc >/dev/null 2>&1; then
+		ndmc -c 'show version' 2>/dev/null | sed -n 's/^model:[[:space:]]*//p' | head -n1 && return
+	fi
+	if [ -r /proc/device-tree/model ]; then
+		tr -d '\000' </proc/device-tree/model 2>/dev/null && return
+	fi
+	if [ -r /proc/cpuinfo ]; then
+		sed -n 's/^Hardware[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo | head -n1 | grep -q . && \
+			sed -n 's/^Hardware[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo | head -n1 && return
+	fi
+	printf 'Keenetic/KNDMS router'
+}
+
+board_name() {
+	if command -v ndmc >/dev/null 2>&1; then
+		ndmc -c 'show version' 2>/dev/null | sed -n 's/^hw_id:[[:space:]]*//p' | head -n1 && return
+	fi
+	printf 'unknown'
+}
+
+release_text() {
+	if command -v ndmc >/dev/null 2>&1; then
+		ndmc -c 'show version' 2>/dev/null | sed -n 's/^title:[[:space:]]*//p' | head -n1 | grep -q . && \
+			ndmc -c 'show version' 2>/dev/null | sed -n 's/^title:[[:space:]]*//p' | head -n1 && return
+	fi
+	if [ -r /proc/version ]; then
+		printf 'KNDMS (%s)' "$(cat /proc/version 2>/dev/null | awk '{print $3}')" && return
+	fi
+	printf 'KNDMS unknown'
+}
+
+uptime_seconds() {
+	if [ -r /proc/uptime ]; then
+		cut -d. -f1 /proc/uptime
+		return
+	fi
+	printf '0'
+}
+
+load_text() {
+	if [ -r /proc/loadavg ]; then
+		awk '{print $1" "$2" "$3}' /proc/loadavg
+		return
+	fi
+	printf '0 0 0'
+}
+
+memory_text() {
+	if [ -r /proc/meminfo ]; then
+		awk '
+			/^MemTotal:/ { total=$2 }
+			/^MemAvailable:/ { avail=$2 }
+			/^MemFree:/ && avail=="" { avail=$2 }
+			END {
+				if (total == "") total = 0
+				if (avail == "") avail = 0
+				printf "%s/%s kB", avail, total
+			}
+		' /proc/meminfo
+		return
+	fi
+	printf '0/0 kB'
+}
+
+# VodkinNET: на Entware "flash" — это точка монтирования /opt (сама флешка),
+# а не /overlay (это специфика OpenWrt squashfs+overlay, которой на KNDMS
+# просто нет структурно).
+flash_text() {
+	local text
+	text="$(
+		df -k /opt 2>/dev/null | awk '
+			function mb(k) {
+				if (k == "" || k == 0) return "0 MB"
+				return sprintf("%.1f MB", k / 1024)
+			}
+			END {
+				if (NF >= 5) {
+					total=$(NF-4); avail=$(NF-2); pct=$(NF-1)
+					printf "%s free / %s (%s used)", mb(avail), mb(total), pct
+				}
+			}
+		'
+	)"
+	[ -n "$text" ] && printf '%s' "$text" || printf 'unknown'
+}
+
+temperature_text() {
+	local file raw max
+	max=""
+	for file in /sys/class/thermal/thermal_zone*/temp /sys/devices/virtual/thermal/thermal_zone*/temp /sys/class/hwmon/hwmon*/temp*_input; do
+		[ -r "$file" ] || continue
+		raw="$(cat "$file" 2>/dev/null | tr -cd '0-9-')"
+		[ -n "$raw" ] || continue
+		case "$raw" in -*|'') continue ;; esac
+		[ -z "$max" ] && max="$raw"
+		[ "$raw" -gt "$max" ] 2>/dev/null && max="$raw"
+	done
+	if [ -n "$max" ]; then
+		awk -v t="$max" 'BEGIN { if (t > 1000) printf "%.1f C", t / 1000; else printf "%s C", t }'
+		return
+	fi
+	printf 'unknown'
+}
+
+ps_all() {
+	ps w 2>/dev/null || ps 2>/dev/null || true
+}
+
+ssh_running() {
+	ps_all | grep -E '[d]ropbear|[s]shd' >/dev/null 2>&1
+}
+
+# --- xray: поиск бинаря, детект запущенности через /proc (не pidfile) -----
+# VodkinNET: как и в owrt-remote — matching по /proc/*/cmdline на путь
+# конфига надёжнее, чем самоуправляемый pidfile: переживает внешний
+# рестарт/ручной запуск и не путается со stale pidfile после краша.
+
 xray_bin_path() {
 	local configured candidate
 	configured="$(conf_get XRAY_BIN '')"
@@ -129,11 +262,6 @@ xray_bin_path() {
 		printf '%s' "$configured"
 		return 0
 	fi
-	# VodkinNET: не привязываемся к тому, как именно собран конкретный
-	# Keenetic-клон/Entware-инсталляция — разные модели/версии прошивки
-	# кладут opkg-бинари в разные префиксы (/opt/bin, /opt/sbin,
-	# /opt/usr/bin) в зависимости от архитектуры и того, как настроен
-	# extroot. Пробуем все известные варианты + PATH.
 	for candidate in \
 		/opt/sbin/xray /opt/bin/xray /opt/usr/bin/xray /opt/usr/sbin/xray \
 		/opt/sbin/xray-core /opt/bin/xray-core /opt/usr/bin/xray-core /opt/usr/sbin/xray-core \
@@ -163,41 +291,57 @@ ensure_xray_available() {
 	xray_bin_path >/dev/null 2>&1 || die "xray-core поставлен, но бинарь не найден по известным путям"
 }
 
+xray_pids() {
+	local config cmdline cmd pid
+	config="$(conf_get XRAY_CONFIG /opt/etc/netcraze-remote/xray-client.json)"
+	[ -n "$config" ] || return 0
+	for cmdline in /proc/[0-9]*/cmdline; do
+		[ -r "$cmdline" ] || continue
+		cmd="$(tr '\000' ' ' <"$cmdline" 2>/dev/null || true)"
+		case "$cmd" in
+			*xray*"$config"*|*xray-core*"$config"*)
+				pid="${cmdline%/cmdline}"
+				pid="${pid##*/}"
+				printf '%s\n' "$pid"
+				;;
+		esac
+	done
+}
+
 xray_running() {
-	[ -f "$PID_XRAY" ] || return 1
-	kill -0 "$(cat "$PID_XRAY" 2>/dev/null)" 2>/dev/null
+	[ -n "$(xray_pids)" ]
 }
 
-heartbeat_running() {
-	[ -f "$PID_HB" ] || return 1
-	kill -0 "$(cat "$PID_HB" 2>/dev/null)" 2>/dev/null
-}
-
-# --- рендер клиентского xray-конфига (реверс-туннель, N сервисов) --------
-# Каждый SERVICE_i — отдельная persistent VLESS-исходящая коннекция к Hub
-# (свой uuid, свой reverse-tag) + freedom-outbound, форвардящий локальный
-# трафик на реальный сервис устройства (NDMS-морда, любой SSH, что угодно).
+# --- рендер клиентского xray-конфига (та же fixed admin+ssh схема, что --
+# --- и в vodkinnet-owrt-remote — Hub ждёт именно эти два reverse-канала) --
 
 render_client_config() {
-	local out stdout vps_host vps_port encryption flow tls_sni stream_settings
-	local svc_count i slug label host port uuid tag
-	local outbounds_json rules_json
+	local out stdout router_id vps_host vps_port uuid ssh_uuid encryption flow
+	local reverse_tag ssh_reverse_tag admin_host admin_port ssh_host ssh_port
+	local xray_config tls_sni stream_settings
 
 	stdout="0"
 	[ "${1:-}" = "--stdout" ] && stdout="1"
 
+	router_id="$(safe_id "$(conf_get ROUTER_ID netcraze)")"
 	vps_host="$(conf_get VPS_HOST '')"
-	vps_port="$(conf_get VPS_PORT 8444)"
+	vps_port="$(safe_num "$(conf_get VPS_PORT 8444)" 8444)"
+	uuid="$(conf_get VLESS_UUID '')"
+	ssh_uuid="$(conf_get SSH_VLESS_UUID '')"
 	encryption="$(conf_get VLESS_ENCRYPTION none)"
 	flow="$(conf_get VLESS_FLOW '')"
+	reverse_tag="$(safe_id "$(conf_get REVERSE_TAG reverse-in)")"
+	ssh_reverse_tag="$(safe_id "$(conf_get SSH_REVERSE_TAG "${reverse_tag}-ssh")")"
+	admin_host="$(conf_get ADMIN_HOST "$(lan_ip_default)")"
+	admin_port="$(safe_num "$(conf_get ADMIN_PORT 80)" 80)"
+	ssh_host="$(conf_get SSH_HOST "$(lan_ip_default)")"
+	ssh_port="$(safe_num "$(conf_get SSH_PORT 22)" 22)"
+	xray_config="$(conf_get XRAY_CONFIG /opt/etc/netcraze-remote/xray-client.json)"
 	tls_sni="$(conf_get TLS_SNI '')"
-	svc_count="$(conf_get SERVICE_COUNT 0)"
 
-	[ -n "$vps_host" ] || die "VPS_HOST пустой в $CONF"
-	case "$svc_count" in
-		''|*[!0-9]*) die "SERVICE_COUNT некорректен в $CONF" ;;
-	esac
-	[ "$svc_count" -gt 0 ] || die "SERVICE_COUNT=0 — нет ни одного сервиса, добавь хотя бы один в панели Hub"
+	[ -n "$vps_host" ] || die "VPS_HOST пустой"
+	[ -n "$uuid" ] || die "VLESS_UUID пустой"
+	[ -n "$ssh_uuid" ] || ssh_uuid="$uuid"
 
 	if [ -n "$tls_sni" ]; then
 		stream_settings="\"streamSettings\": {
@@ -213,66 +357,82 @@ render_client_config() {
         \"network\": \"tcp\",
         \"security\": \"none\"
       }"
-		warn "TLS_SNI пустой — реверс-канал идёт БЕЗ шифрования. Это управляющий канал (доступ ко всем сервисам ниже), лучше задать TLS_SNI."
+		warn "TLS_SNI пустой — реверс-канал идёт БЕЗ шифрования"
 	fi
-
-	outbounds_json=""
-	rules_json=""
-	i=1
-	while [ "$i" -le "$svc_count" ]; do
-		slug="$(safe_id "$(conf_get "SERVICE_${i}_SLUG" "svc$i")")"
-		host="$(conf_get "SERVICE_${i}_HOST" 127.0.0.1)"
-		port="$(conf_get "SERVICE_${i}_PORT" '')"
-		uuid="$(conf_get "SERVICE_${i}_UUID" '')"
-		tag="$(safe_id "$(conf_get "SERVICE_${i}_TAG" "reverse-svc$i")")"
-
-		if [ -z "$port" ] || [ -z "$uuid" ]; then
-			warn "SERVICE_${i}: пустой PORT или UUID — пропускаю (проверь конфиг)"
-			i=$((i + 1))
-			continue
-		fi
-
-		[ -n "$outbounds_json" ] && outbounds_json="${outbounds_json},"
-		outbounds_json="${outbounds_json}
-    {
-      \"tag\": \"out-${slug}\",
-      \"protocol\": \"freedom\",
-      \"settings\": { \"redirect\": \"$(json_escape "$host"):$port\" }
-    },
-    {
-      \"tag\": \"vps-${slug}\",
-      \"protocol\": \"vless\",
-      \"settings\": {
-        \"address\": \"$(json_escape "$vps_host")\",
-        \"port\": $vps_port,
-        \"id\": \"$(json_escape "$uuid")\",
-        \"encryption\": \"$(json_escape "$encryption")\",
-        \"flow\": \"$(json_escape "$flow")\",
-        \"reverse\": { \"tag\": \"$(json_escape "$tag")\" }
-      },
-      $stream_settings
-    }"
-
-		[ -n "$rules_json" ] && rules_json="${rules_json},"
-		rules_json="${rules_json}
-      { \"type\": \"field\", \"inboundTag\": [\"$(json_escape "$tag")\"], \"outboundTag\": \"out-${slug}\" }"
-
-		i=$((i + 1))
-	done
 
 	out="${TMPDIR:-/opt/tmp}/netcraze-remote-client.$$"
 	mkdir -p "$(dirname "$out")"
-	cat > "$out" <<EOF
+	cat >"$out" <<EOF
 {
-  "log": { "loglevel": "warning" },
+  "log": {
+    "loglevel": "warning"
+  },
   "inbounds": [],
-  "outbounds": [${outbounds_json}
+  "outbounds": [
+    {
+      "tag": "router-admin",
+      "protocol": "freedom",
+      "settings": {
+        "redirect": "$(json_escape "$admin_host"):$admin_port"
+      }
+    },
+    {
+      "tag": "router-ssh",
+      "protocol": "freedom",
+      "settings": {
+        "redirect": "$(json_escape "$ssh_host"):$ssh_port"
+      }
+    },
+    {
+      "tag": "vps-interconn",
+      "protocol": "vless",
+      "settings": {
+        "address": "$(json_escape "$vps_host")",
+        "port": $vps_port,
+        "id": "$(json_escape "$uuid")",
+        "encryption": "$(json_escape "$encryption")",
+        "flow": "$(json_escape "$flow")",
+        "reverse": {
+          "tag": "$(json_escape "$reverse_tag")"
+        }
+      },
+      $stream_settings
+    },
+    {
+      "tag": "vps-ssh-interconn",
+      "protocol": "vless",
+      "settings": {
+        "address": "$(json_escape "$vps_host")",
+        "port": $vps_port,
+        "id": "$(json_escape "$ssh_uuid")",
+        "encryption": "$(json_escape "$encryption")",
+        "flow": "$(json_escape "$flow")",
+        "reverse": {
+          "tag": "$(json_escape "$ssh_reverse_tag")"
+        }
+      },
+      $stream_settings
+    }
   ],
   "routing": {
-    "rules": [${rules_json}
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": [
+          "$(json_escape "$reverse_tag")"
+        ],
+        "outboundTag": "router-admin"
+      },
+      {
+        "type": "field",
+        "inboundTag": [
+          "$(json_escape "$ssh_reverse_tag")"
+        ],
+        "outboundTag": "router-ssh"
+      }
     ]
   },
-  "remarks": "netcraze-remote client ($(json_escape "$(conf_get ROUTER_ID netcraze)"))"
+  "remarks": "netcraze-remote client for $(json_escape "$router_id")"
 }
 EOF
 
@@ -282,8 +442,6 @@ EOF
 		return
 	fi
 
-	local xray_config
-	xray_config="$(conf_get XRAY_CONFIG /opt/etc/netcraze-remote/xray-client.json)"
 	mkdir -p "$(dirname "$xray_config")"
 	cp "$out" "$xray_config"
 	chmod 0600 "$xray_config"
@@ -291,16 +449,16 @@ EOF
 	printf '%s\n' "$xray_config"
 }
 
-# --- запуск xray в фоне под своим pidfile --------------------------------
+# --- запуск xray в фоне ----------------------------------------------------
 
 start_xray() {
 	local enabled xray_bin xray_config
 	require_entware
 	enabled="$(conf_get ENABLED 0)"
-	case "$enabled" in 1|yes|true|on) : ;; *) die "сервис выключен: поставь ENABLED=\"1\" в $CONF" ;; esac
+	truthy "$enabled" || die "сервис выключен: поставь ENABLED=\"1\" в $CONF"
 
 	if xray_running; then
-		warn "xray уже запущен (pid $(cat "$PID_XRAY"))"
+		warn "xray уже запущен (pid $(xray_pids | tr '\n' ' '))"
 		return 0
 	fi
 
@@ -308,91 +466,92 @@ start_xray() {
 	xray_bin="$(xray_bin_path)" || die "xray не найден"
 	xray_config="$(render_client_config)"
 
-	mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
+	mkdir -p "$(dirname "$LOG_FILE")"
 
 	if "$xray_bin" help 2>/dev/null | grep -q '^ *run'; then
 		nohup "$xray_bin" run -config "$xray_config" >>"$LOG_FILE" 2>&1 &
 	else
 		nohup "$xray_bin" -config "$xray_config" >>"$LOG_FILE" 2>&1 &
 	fi
-	echo $! > "$PID_XRAY"
-	ok "xray запущен, pid $(cat "$PID_XRAY"), конфиг $xray_config"
+	sleep 1
+	if xray_running; then
+		ok "xray запущен (pid $(xray_pids | tr '\n' ' ')), конфиг $xray_config"
+	else
+		warn "xray стартовал, но не виден в /proc через секунду — проверь $LOG_FILE"
+	fi
 }
 
 stop_xray() {
-	if xray_running; then
-		kill "$(cat "$PID_XRAY")" 2>/dev/null
-		rm -f "$PID_XRAY"
-		ok "xray остановлен"
-	else
+	local pids pid alive
+	pids="$(xray_pids)"
+	if [ -z "$pids" ]; then
 		warn "xray не был запущен"
+		return 0
 	fi
-}
-
-# --- generic-детекты (без привязки к конкретной сборке) -------------------
-
-lan_ip_default() {
-	local ip iface
-	for iface in $(ip -o -4 addr show 2>/dev/null | awk '{print $2}'); do
-		case "$iface" in
-			lo|ppp*|wan*|pppoe*|tun*|tap*|docker*|veth*) continue ;;
-		esac
-		ip="$(ip -4 addr show "$iface" 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -n1)"
-		case "$ip" in
-			10.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|192.168.*)
-				printf '%s' "$ip"
-				return 0
-				;;
-		esac
+	for pid in $pids; do
+		kill "$pid" >/dev/null 2>&1 || true
 	done
-	ip="$(ip -4 addr show 2>/dev/null | awk '/inet /{print $2}' | grep -v '^127\.' | head -n1 | cut -d/ -f1)"
-	[ -n "$ip" ] && printf '%s' "$ip" || printf '127.0.0.1'
+	sleep 1
+	alive=""
+	for pid in $pids; do
+		if kill -0 "$pid" >/dev/null 2>&1; then
+			kill -9 "$pid" >/dev/null 2>&1 || true
+			alive="$alive $pid"
+		fi
+	done
+	if [ -n "$alive" ]; then
+		ok "xray остановлен принудительно:$alive"
+	else
+		ok "xray остановлен"
+	fi
 }
 
-host_model_text() {
-	if [ -r /proc/sys/kernel/ndm_model_name ]; then
-		cat /proc/sys/kernel/ndm_model_name 2>/dev/null && return
-	fi
-	if command -v ndmc >/dev/null 2>&1; then
-		ndmc -c 'show version' 2>/dev/null | sed -n 's/^model:[[:space:]]*//p' | head -n1 && return
-	fi
-	if [ -r /proc/device-tree/model ]; then
-		tr -d '\000' </proc/device-tree/model 2>/dev/null && return
-	fi
-	if [ -r /proc/cpuinfo ]; then
-		sed -n 's/^Hardware[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo | head -n1 | grep -q . && \
-			sed -n 's/^Hardware[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo | head -n1 && return
-	fi
-	printf 'Keenetic/KNDMS router'
+heartbeat_running() {
+	[ -f "$PID_HB" ] || return 1
+	kill -0 "$(cat "$PID_HB" 2>/dev/null)" 2>/dev/null
 }
 
-ssh_running() {
-	ps w 2>/dev/null | grep -E '[d]ropbear|[s]shd' >/dev/null 2>&1
-}
-
-# --- heartbeat + watchdog --------------------------------------------------
+# --- heartbeat: те же имена полей, что и у owrt-remote --------------------
+# (release/board/model/admin_host/admin_port/ssh_host/ssh_port/uptime/load/
+# memory/flash/temperature/xray/ssh/service) — Hub рендерит карточки под
+# них без каких-либо правок на своей стороне.
 
 heartbeat_json() {
-	local router_id router_name model uptime_s xray_state ssh_state entware_state
+	local router_id router_name role public_url hub_url xray_state ssh_state enabled_state
+
 	router_id="$(safe_id "$(conf_get ROUTER_ID netcraze)")"
 	router_name="$(conf_get ROUTER_NAME "$router_id")"
-	model="$(host_model_text)"
-	uptime_s="$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo 0)"
+	role="$(conf_get ROLE node)"
+	public_url="$(conf_get PUBLIC_URL '')"
+	hub_url="$(conf_get HUB_URL '')"
 
 	xray_running && xray_state="running" || xray_state="stopped"
 	ssh_running && ssh_state="running" || ssh_state="stopped"
-	entware_ok && entware_state="ok" || entware_state="broken"
+	truthy "$(conf_get ENABLED 0)" && enabled_state="enabled" || enabled_state="disabled"
 
 	cat <<EOF
 {
   "id": $(json_string "$router_id"),
   "name": $(json_string "$router_name"),
-  "model": $(json_string "$model"),
-  "lan_ip": $(json_string "$(lan_ip_default)"),
-  "uptime": $uptime_s,
+  "role": $(json_string "$role"),
+  "model": $(json_string "$(host_model)"),
+  "board": $(json_string "$(board_name)"),
+  "release": $(json_string "$(release_text)"),
+  "hostname": $(json_string "$(hostname 2>/dev/null || printf keenetic)"),
+  "public_url": $(json_string "$public_url"),
+  "admin_host": $(json_string "$(conf_get ADMIN_HOST "$(lan_ip_default)")"),
+  "admin_port": $(safe_num "$(conf_get ADMIN_PORT 80)" 80),
+  "ssh_host": $(json_string "$(conf_get SSH_HOST "$(lan_ip_default)")"),
+  "ssh_port": $(safe_num "$(conf_get SSH_PORT 22)" 22),
+  "hub_url": $(json_string "$hub_url"),
+  "uptime": $(safe_num "$(uptime_seconds)" 0),
+  "load": $(json_string "$(load_text)"),
+  "memory": $(json_string "$(memory_text)"),
+  "flash": $(json_string "$(flash_text)"),
+  "temperature": $(json_string "$(temperature_text)"),
   "xray": $(json_string "$xray_state"),
   "ssh": $(json_string "$ssh_state"),
-  "entware": $(json_string "$entware_state")
+  "service": $(json_string "$enabled_state")
 }
 EOF
 }
@@ -429,23 +588,20 @@ send_heartbeat() {
 heartbeat_loop() {
 	local interval enabled
 	interval="$(conf_get HEARTBEAT_INTERVAL 30)"
-	[ "$interval" -lt 10 ] 2>/dev/null && interval=10
+	case "$interval" in ''|*[!0-9]*) interval=30 ;; esac
+	[ "$interval" -lt 10 ] && interval=10
 	mkdir -p "$STATE_DIR"
 	echo $$ > "$PID_HB"
 	while :; do
 		send_heartbeat >/dev/null 2>&1 || true
-		# VodkinNET: самовосстановление — если xray упал (крэш/OOM/обновление
-		# Entware зацепило бинарь), сам процесс героического ручного захода
-		# невозможен (тоннель и есть канал доступа), так что чиним сами.
+		# VodkinNET: самовосстановление — если xray упал, зайти его
+		# перезапустить вручную физически некуда (тоннель и есть канал
+		# доступа), поэтому чиним сами.
 		enabled="$(conf_get ENABLED 0)"
-		case "$enabled" in
-			1|yes|true|on)
-				if entware_ok && ! xray_running; then
-					log "watchdog: xray не запущен, пробую поднять..."
-					start_xray >/dev/null 2>&1 || log "watchdog: не удалось поднять xray"
-				fi
-				;;
-		esac
+		if truthy "$enabled" && entware_ok && ! xray_running; then
+			log "watchdog: xray не запущен, пробую поднять..."
+			start_xray >/dev/null 2>&1 || log "watchdog: не удалось поднять xray"
+		fi
 		sleep "$interval"
 	done
 }
@@ -455,6 +611,7 @@ start_heartbeat() {
 		warn "heartbeat уже запущен (pid $(cat "$PID_HB"))"
 		return 0
 	fi
+	mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
 	nohup "$0" heartbeat-loop >>"$LOG_FILE" 2>&1 &
 	echo $! > "$PID_HB"
 	ok "heartbeat запущен, pid $(cat "$PID_HB")"
@@ -470,10 +627,7 @@ stop_heartbeat() {
 	fi
 }
 
-# --- pull-config: перетянуть конфиг с Hub целиком (text/plain, не JSON) ---
-# Hub отдаёт ТОТ ЖЕ формат KEY="value", что и локальный конфиг (см.
-# /api/render-client-conf на Hub) — поэтому не нужен JSON-парсинг в shell,
-# просто заменяем файл целиком, сохранив локальные (не known Hub'у) поля.
+# --- pull-config: перетянуть конфиг с Hub целиком (text/plain) -----------
 
 pull_config() {
 	local hub_url token endpoint tmp enabled xray_bin xray_config hb_interval
@@ -481,7 +635,7 @@ pull_config() {
 	token="$(conf_get HUB_TOKEN '')"
 	[ -n "$hub_url" ] || die "HUB_URL пустой"
 	[ -n "$token" ] || die "HUB_TOKEN пустой"
-	endpoint="${hub_url%/}/api/render-client-conf"
+	endpoint="${hub_url%/}/router/$(conf_get ROUTER_ID netcraze)/config"
 	tmp="${TMPDIR:-/opt/tmp}/netcraze-remote-pull.$$"
 	mkdir -p "$(dirname "$tmp")"
 
@@ -492,7 +646,6 @@ pull_config() {
 	fi
 	grep -q '^ROUTER_ID=' "$tmp" || die "ответ Hub не похож на валидный конфиг (проверь HUB_TOKEN/HUB_URL)"
 
-	# сохраняем локально-только поля, которых Hub не знает и не должен затирать
 	enabled="$(conf_get ENABLED 1)"
 	xray_bin="$(conf_get XRAY_BIN '')"
 	xray_config="$(conf_get XRAY_CONFIG /opt/etc/netcraze-remote/xray-client.json)"
@@ -508,41 +661,30 @@ pull_config() {
 	conf_set XRAY_CONFIG "$xray_config"
 	conf_set HEARTBEAT_INTERVAL "$hb_interval"
 
-	ok "конфиг обновлён из Hub (бэкап предыдущего рядом с .bak.*), перезапусти: netcraze-remote restart"
+	ok "конфиг обновлён из Hub (бэкап рядом с .bak.*), перезапусти: netcraze-remote restart"
 }
 
 # --- status / doctor -------------------------------------------------------
 
 status() {
-	local svc_count i
 	printf 'router_id: %s\n' "$(conf_get ROUTER_ID '')"
 	printf 'router_name: %s\n' "$(conf_get ROUTER_NAME '')"
+	printf 'role: %s\n' "$(conf_get ROLE node)"
 	printf 'enabled: %s\n' "$(conf_get ENABLED 0)"
 	printf 'hub_url: %s\n' "$(conf_get HUB_URL '')"
 	printf 'vps_host: %s\n' "$(conf_get VPS_HOST '')"
 	printf 'vps_port: %s\n' "$(conf_get VPS_PORT 8444)"
+	printf 'admin: %s:%s\n' "$(conf_get ADMIN_HOST "$(lan_ip_default)")" "$(conf_get ADMIN_PORT 80)"
+	printf 'ssh: %s:%s\n' "$(conf_get SSH_HOST "$(lan_ip_default)")" "$(conf_get SSH_PORT 22)"
 	printf 'xray_bin: %s\n' "$(xray_bin_path 2>/dev/null || echo 'не найден')"
 	printf 'xray_config: %s\n' "$(conf_get XRAY_CONFIG /opt/etc/netcraze-remote/xray-client.json)"
-	if xray_running; then printf 'xray_state: running (pid %s)\n' "$(cat "$PID_XRAY")"; else printf 'xray_state: stopped\n'; fi
+	if xray_running; then printf 'xray_state: running (pid %s)\n' "$(xray_pids | tr '\n' ' ')"; else printf 'xray_state: stopped\n'; fi
 	if heartbeat_running; then printf 'heartbeat_state: running (pid %s)\n' "$(cat "$PID_HB")"; else printf 'heartbeat_state: stopped\n'; fi
 	entware_ok && printf 'entware: ok\n' || printf 'entware: НЕ РАБОТАЕТ (см. doctor)\n'
-
-	svc_count="$(conf_get SERVICE_COUNT 0)"
-	printf 'services (%s):\n' "$svc_count"
-	i=1
-	while [ "$i" -le "$svc_count" ] 2>/dev/null; do
-		printf '  %s: %s -> %s:%s (%s)\n' \
-			"$i" \
-			"$(conf_get "SERVICE_${i}_LABEL" '?')" \
-			"$(conf_get "SERVICE_${i}_HOST" '?')" \
-			"$(conf_get "SERVICE_${i}_PORT" '?')" \
-			"$(conf_get "SERVICE_${i}_KIND" '?')"
-		i=$((i + 1))
-	done
 }
 
 doctor() {
-	local ok_all=1 svc_count i
+	local ok_all=1
 
 	printf 'Диагностика netcraze-remote\n'
 	printf -- '---------------------------\n'
@@ -550,7 +692,7 @@ doctor() {
 	if entware_ok; then
 		ok "Entware работает по-настоящему (opkg/opkg.conf/отдельная точка монтирования /opt)"
 	else
-		printf '%b[!!]%b Entware НЕ прошёл функциональную проверку — см. netcraze_vpn_setup_summary.md ("disk is unchanged")\n' "$C_RED" "$C_NC"
+		printf '%b[!!]%b Entware НЕ прошёл функциональную проверку\n' "$C_RED" "$C_NC"
 		ok_all=0
 	fi
 
@@ -566,7 +708,7 @@ doctor() {
 		ok_all=0
 	fi
 
-	for key in VPS_HOST HUB_URL HUB_TOKEN; do
+	for key in VPS_HOST VLESS_UUID HUB_URL HUB_TOKEN; do
 		val="$(conf_get "$key" '')"
 		if [ -n "$val" ]; then ok "$key задан"; else
 			printf '%b[!!]%b %s пустой в конфиге\n' "$C_RED" "$C_NC" "$key"
@@ -574,33 +716,36 @@ doctor() {
 		fi
 	done
 
-	svc_count="$(conf_get SERVICE_COUNT 0)"
-	if [ "$svc_count" -gt 0 ] 2>/dev/null; then
-		ok "сервисов настроено: $svc_count"
-		i=1
-		while [ "$i" -le "$svc_count" ]; do
-			if [ -z "$(conf_get "SERVICE_${i}_UUID" '')" ] || [ -z "$(conf_get "SERVICE_${i}_PORT" '')" ]; then
-				printf '%b[!!]%b SERVICE_%s: пустой UUID или PORT\n' "$C_RED" "$C_NC" "$i"
-				ok_all=0
-			fi
-			i=$((i + 1))
-		done
-	else
-		printf '%b[!!]%b SERVICE_COUNT=0 — нет ни одного сервиса\n' "$C_RED" "$C_NC"
-		ok_all=0
-	fi
-
-	if xray_running; then ok "xray процесс запущен"; else warn "xray процесс не запущен (netcraze-remote start)"; fi
+	if xray_running; then ok "xray процесс запущен ($(xray_pids | tr '\n' ' '))"; else warn "xray процесс не запущен (netcraze-remote start)"; fi
 	if heartbeat_running; then ok "heartbeat запущен"; else warn "heartbeat не запущен"; fi
 
 	if [ -d /opt/etc/xray/configs ]; then
 		warn "обнаружен /opt/etc/xray/configs (похоже на XKeen) — netcraze-remote его НЕ трогает, использует отдельный XRAY_CONFIG=$(conf_get XRAY_CONFIG /opt/etc/netcraze-remote/xray-client.json)"
 	fi
 
-	if ssh_running; then
-		ok "на устройстве виден работающий SSH-демон (dropbear/sshd) — проверь, что нужный порт указан в одном из SERVICE_N"
-	else
-		warn "SSH-демон не обнаружен через ps — если это NDMS SSH (не через Entware процесс), это нормально, просто нечем перепроверить локально"
+	# Живая проверка: реально ли запускается xray с текущим конфигом
+	# (полезно поймать ошибку JSON/бинаря ДО попытки полноценного старта)
+	if xray_bin_path >/dev/null 2>&1 && [ -n "$(conf_get VLESS_UUID '')" ]; then
+		local test_config test_bin test_out
+		test_bin="$(xray_bin_path)"
+		test_config="$(render_client_config --stdout 2>/dev/null | tee "${TMPDIR:-/opt/tmp}/ncr-doctor-test.json" 2>/dev/null)"
+		if command -v python3 >/dev/null 2>&1; then
+			if printf '%s' "$test_config" | python3 -c "import json,sys; json.load(sys.stdin)" >/dev/null 2>&1; then
+				ok "сгенерированный client-конфиг — валидный JSON"
+			else
+				printf '%b[!!]%b сгенерированный client-конфиг НЕ валидный JSON — вот он:\n' "$C_RED" "$C_NC"
+				printf '%s\n' "$test_config"
+				ok_all=0
+			fi
+		fi
+		test_out="$("$test_bin" -test -config "${TMPDIR:-/opt/tmp}/ncr-doctor-test.json" 2>&1 || "$test_bin" run -test -config "${TMPDIR:-/opt/tmp}/ncr-doctor-test.json" 2>&1)"
+		if printf '%s' "$test_out" | grep -qi "error\|failed\|panic"; then
+			printf '%b[!!]%b xray не принял конфиг (тестовый прогон):\n%s\n' "$C_RED" "$C_NC" "$test_out"
+			ok_all=0
+		else
+			ok "xray принял тестовый конфиг (-test) без ошибок"
+		fi
+		rm -f "${TMPDIR:-/opt/tmp}/ncr-doctor-test.json"
 	fi
 
 	[ "$ok_all" = "1" ] && ok "всё выглядит нормально" || warn "есть проблемы — см. выше"
