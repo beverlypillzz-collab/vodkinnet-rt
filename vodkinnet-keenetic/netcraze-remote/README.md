@@ -157,6 +157,11 @@ PURGE=1 sh uninstall.sh
 ### Hub (VPS)
 
 ```sh
+wget -O uninstall.sh "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/uninstall.sh"
+sh uninstall.sh
+```
+
+```sh
 sudo sh vps/uninstall-vps.sh
 ```
 
