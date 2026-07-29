@@ -2052,9 +2052,6 @@ function render(list) {{
       (r.admin_host ? (r.admin_host + ':' + (r.admin_port || 80)) : 'admin: авто (LAN IP)')
     ].filter(Boolean).slice(0, 5);
     const tagHtml = tags.map(t => `<span class="tag">${{escapeHtml(t)}}</span>`).join('');
-    const adminButton = online
-      ? `<a class="btn" href="${{escapeAttr(access)}}">Админка</a>`
-      : `<span class="btn disabled">Админка</span>`;
     const sshReady = online && ssh === 'running' && Number(r.ssh_entry_port || 0) > 0;
     const sshButton = sshReady
       ? `<a class="btn" href="${{escapeAttr(r.ssh_url || ('/ssh/' + encodeURIComponent(r.id) + '/'))}}" target="_blank" rel="noopener noreferrer">SSH</a>`
@@ -2085,7 +2082,6 @@ function render(list) {{
         ${{metricHtml}}
       </div>
       <div class="actions">
-        ${{adminButton}}
         ${{sshButton}}
         <a class="btn" href="${{escapeAttr(r.config_url)}}">Конфиг</a>
         <a class="btn" href="${{escapeAttr(r.xray_client_url)}}">Client JSON</a>
@@ -2133,9 +2129,6 @@ render = function(list) {{
       (r.admin_host ? (r.admin_host + ':' + (r.admin_port || 80)) : 'admin: авто (LAN IP)')
     ].filter(Boolean).slice(0, 5);
     const tagHtml = tags.map(t => `<span class="tag">${{escapeHtml(t)}}</span>`).join('');
-    const adminButton = online
-      ? `<a class="btn" href="${{escapeAttr(access)}}">Админка</a>`
-      : `<span class="btn disabled">Админка</span>`;
     const sshReady = online && ssh === 'running' && Number(r.ssh_entry_port || 0) > 0;
     const sshButton = sshReady
       ? `<a class="btn" href="${{escapeAttr(r.ssh_url || ('/ssh/' + encodeURIComponent(r.id) + '/'))}}" target="_blank" rel="noopener noreferrer">SSH</a>`
@@ -2164,7 +2157,6 @@ render = function(list) {{
         ${{metricHtml}}
       </div>
       <div class="actions">
-        ${{adminButton}}
         ${{sshButton}}
         <a class="btn" href="${{escapeAttr(r.config_url)}}">Конфиг</a>
         <a class="btn" href="${{escapeAttr(r.xray_client_url)}}">Client JSON</a>
@@ -2265,7 +2257,7 @@ document.getElementById('xrayReload').addEventListener('click', async () => {{
   const res = await fetch('/api/xray/reload', {{method: 'POST'}});
   const text = await res.text();
   if (res.ok) {{
-    let message = 'Xray VPS обновлён. Теперь кнопка Админка должна идти в свежие порты.';
+    let message = 'Xray VPS обновлён.';
     try {{
       const data = JSON.parse(text);
       message = `Xray VPS обновлён: ${{data.config}}, роутеров в конфиге: ${{data.routers}}.`;
