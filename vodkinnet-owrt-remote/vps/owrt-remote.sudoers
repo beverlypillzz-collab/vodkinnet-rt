@@ -1,0 +1,10 @@
+# owrt-remote: узкое sudoers-правило.
+#
+# Hub-процесс работает от непривилегированного системного пользователя
+# openwrt-remote — единственное root-действие, которое ему реально нужно,
+# это перезапуск ОДНОГО конкретного systemd-юнита (owrt-remote-xray) по
+# кнопкам "Обновить/Рестарт Xray VPS" в панели.
+#
+# Путь к systemctl подставь свой (обычно /usr/bin/systemctl или
+# /bin/systemctl — проверь: command -v systemctl).
+openwrt-remote ALL=(root) NOPASSWD: /usr/bin/systemctl restart owrt-remote-xray
