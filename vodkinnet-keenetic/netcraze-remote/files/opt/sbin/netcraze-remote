@@ -246,6 +246,23 @@ ps_all() {
 	ps w 2>/dev/null || ps 2>/dev/null || true
 }
 
+# VodkinNET: на практике оказалось, что на этой прошивке/сборке Entware
+# просто НЕТ бинаря nohup вообще (opkg install coreutils-nohup не стоит
+# по умолчанию) — "nohup ... &" в таком случае тихо ничего не запускает
+# (busybox ash пишет "nohup: not found" в лог и на этом всё, никакой
+# ошибки наружу, xray просто никогда не стартовал — именно так и было
+# найдено на реальном устройстве). Не полагаемся на внешний бинарь
+# вообще — тот же эффект (процесс переживает выход родительского
+# скрипта, SIGHUP игнорируется) даёт чистый POSIX trap в сабшелле, без
+# зависимости от того, что реально установлено в системе.
+bg_run() {
+	if command -v nohup >/dev/null 2>&1; then
+		nohup "$@" &
+	else
+		(trap '' HUP; exec "$@") &
+	fi
+}
+
 ssh_running() {
 	ps_all | grep -E '[d]ropbear|[s]shd' >/dev/null 2>&1
 }
@@ -469,9 +486,9 @@ start_xray() {
 	mkdir -p "$(dirname "$LOG_FILE")"
 
 	if "$xray_bin" help 2>/dev/null | grep -q '^ *run'; then
-		nohup "$xray_bin" run -config "$xray_config" >>"$LOG_FILE" 2>&1 &
+		bg_run "$xray_bin" run -config "$xray_config" >>"$LOG_FILE" 2>&1
 	else
-		nohup "$xray_bin" -config "$xray_config" >>"$LOG_FILE" 2>&1 &
+		bg_run "$xray_bin" -config "$xray_config" >>"$LOG_FILE" 2>&1
 	fi
 	sleep 1
 	if xray_running; then
@@ -612,7 +629,7 @@ start_heartbeat() {
 		return 0
 	fi
 	mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
-	nohup "$0" heartbeat-loop >>"$LOG_FILE" 2>&1 &
+	bg_run "$0" heartbeat-loop >>"$LOG_FILE" 2>&1
 	echo $! > "$PID_HB"
 	ok "heartbeat запущен, pid $(cat "$PID_HB")"
 }
