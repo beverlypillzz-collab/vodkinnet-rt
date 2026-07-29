@@ -233,6 +233,21 @@ else
 fi
 ADMIN_USER="${NETCRAZE_REMOTE_ADMIN_USER:-admin}"
 
+# VodkinNET: полный публичный URL панели — считаем ОДИН раз здесь и
+# переиспользуем и для hub.env (PUBLIC_URL, чтобы агенты роутеров
+# получали правильный HUB_URL с портом), и для финального вывода.
+# Раньше PUBLIC_URL не выставлялся вовсе, и Hub пытался угадать адрес
+# по заголовку Host входящего запроса — а nginx (Host $host, без порта)
+# обрезает порт при проксировании, так что агент получал
+# "http://hub.vodkin.net" без :7443 и без https, и heartbeat никогда
+# не долетал до реального Hub'а (это было найдено на практике: карточка
+# роутера в панели вечно показывала "Оффлайн"/"waiting heartbeat").
+if [ "$EXTERNAL_HTTPS_PORT" = "443" ]; then
+	PUBLIC_URL="https://${HUB_DOMAIN}"
+else
+	PUBLIC_URL="https://${HUB_DOMAIN}:${EXTERNAL_HTTPS_PORT}"
+fi
+
 # --- env для systemd ---
 cat > "$ENV_FILE" <<EOF
 NETCRAZE_REMOTE_STATE_DIR=${STATE_DIR}
@@ -245,6 +260,7 @@ NETCRAZE_REMOTE_TLS_CERT=${CERT_PATH}
 NETCRAZE_REMOTE_TLS_KEY=${KEY_PATH}
 NETCRAZE_REMOTE_TLS_SNI=${HUB_DOMAIN}
 NETCRAZE_REMOTE_PUBLIC_HOST=${HUB_DOMAIN}
+NETCRAZE_REMOTE_PUBLIC_URL=${PUBLIC_URL}
 NETCRAZE_REMOTE_VPS_SSH_USER=root
 NETCRAZE_REMOTE_VPS_SSH_PORT=22
 NETCRAZE_REMOTE_SUDO_RESTART=1
@@ -342,17 +358,11 @@ if command -v ufw >/dev/null 2>&1; then
 	ufw allow "${EXTERNAL_HTTPS_PORT}/tcp" || true
 fi
 
-if [ "$EXTERNAL_HTTPS_PORT" = "443" ]; then
-	PANEL_URL="https://${HUB_DOMAIN}/"
-else
-	PANEL_URL="https://${HUB_DOMAIN}:${EXTERNAL_HTTPS_PORT}/"
-fi
-
 echo
 ok "Установка Hub завершена (процессы работают от пользователя ${SVC_USER}, не root)."
 cat <<EOF
 
-  URL панели : ${PANEL_URL}
+  URL панели : ${PUBLIC_URL}/
   Логин      : ${ADMIN_USER}
   Пароль     : ${ADMIN_PASSWORD}
   (пароль показывается один раз, смени его при первом входе)
