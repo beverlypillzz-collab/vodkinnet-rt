@@ -91,6 +91,16 @@ SESSION_COOKIE = "netcraze_remote_session"
 ROUTER_COOKIE = "netcraze_remote_router"
 SESSION_TTL_SECONDS = int(os.environ.get("NETCRAZE_REMOTE_SESSION_TTL", str(30 * 24 * 60 * 60)))
 CAPTCHA_TTL_SECONDS = 600
+# VodkinNET: код капчи вставляется в HTML открытым текстом (см.
+# captcha_challenge()/login_html ниже) — это защищает от подделки
+# ответа без просмотра страницы (HMAC-подпись), но НЕ от автоматического
+# скрипта, который просто читает код из того же HTML-ответа и тут же
+# отправляет его обратно. Реальной защиты от брутфорса капча сама по
+# себе не даёт — добавлен настоящий rate-limit по IP поверх неё.
+LOGIN_MAX_ATTEMPTS = int(os.environ.get("NETCRAZE_REMOTE_LOGIN_MAX_ATTEMPTS", "5"))
+LOGIN_LOCKOUT_SECONDS = int(os.environ.get("NETCRAZE_REMOTE_LOGIN_LOCKOUT_SECONDS", str(5 * 60)))
+LOGIN_ATTEMPTS = {}
+LOGIN_ATTEMPTS_LOCK = threading.Lock()
 NOTIFICATIONS_MAX = 220
 LUCI_ABSOLUTE_ROOTS = ("/ubus", "/cgi-bin/luci", "/luci-static")
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -973,6 +983,30 @@ def captcha_challenge():
     sig = hmac.new(session_token().encode("utf-8"), body.encode("utf-8"), hashlib.sha256).hexdigest()
     token = base64.urlsafe_b64encode(f"{body}:{sig}".encode("utf-8")).decode("ascii")
     return code, token
+
+
+def login_rate_limited(ip):
+    # VodkinNET: настоящая защита от брутфорса (капча выше — не защита,
+    # см. комментарий у LOGIN_MAX_ATTEMPTS). Чистим устаревшие записи по
+    # пути, чтобы словарь не рос бесконечно на долго живущем процессе.
+    now = now_ts()
+    with LOGIN_ATTEMPTS_LOCK:
+        attempts = [t for t in LOGIN_ATTEMPTS.get(ip, []) if now - t < LOGIN_LOCKOUT_SECONDS]
+        LOGIN_ATTEMPTS[ip] = attempts
+        return len(attempts) >= LOGIN_MAX_ATTEMPTS
+
+
+def record_login_failure(ip):
+    now = now_ts()
+    with LOGIN_ATTEMPTS_LOCK:
+        attempts = [t for t in LOGIN_ATTEMPTS.get(ip, []) if now - t < LOGIN_LOCKOUT_SECONDS]
+        attempts.append(now)
+        LOGIN_ATTEMPTS[ip] = attempts
+
+
+def clear_login_failures(ip):
+    with LOGIN_ATTEMPTS_LOCK:
+        LOGIN_ATTEMPTS.pop(ip, None)
 
 
 def verify_captcha(token, answer):
@@ -3638,15 +3672,25 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def login(self):
+        ip = self.client_ip()
+        if login_rate_limited(ip):
+            self.send_bytes(
+                429,
+                login_html(f"Слишком много попыток входа. Подожди {LOGIN_LOCKOUT_SECONDS // 60} мин и попробуй снова.").encode("utf-8"),
+                "text/html; charset=utf-8",
+            )
+            return
         payload = self.read_payload()
         username = payload.get("username", "")
         password = payload.get("password", "")
         captcha_token = payload.get("captcha_token", "")
         captcha_answer = payload.get("captcha_answer", "")
         if not verify_captcha(captcha_token, captcha_answer):
+            record_login_failure(ip)
             self.send_bytes(401, login_html("Неверная капча").encode("utf-8"), "text/html; charset=utf-8")
             return
         if verify_login(username, password):
+            clear_login_failures(ip)
             token, session = make_hub_session(username, self.client_ip(), self.headers.get("User-Agent", ""))
             add_notification(
                 "login",
@@ -3658,6 +3702,7 @@ class Handler(BaseHTTPRequestHandler):
             )
             self.redirect("/", [("Set-Cookie", self.session_cookie(token))])
             return
+        record_login_failure(ip)
         self.send_bytes(401, login_html("Неверный логин или пароль").encode("utf-8"), "text/html; charset=utf-8")
 
     def update_auth(self):
