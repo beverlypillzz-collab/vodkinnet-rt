@@ -157,7 +157,7 @@ curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/
 в базе знаний — раздел про Entware/OPKG на этой прошивке).
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/install.sh?v=$(date +%s)" | sh
+wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/install.sh?v=$(date +%s)" | sh
 ```
 
 Скрипт сам проверит, что Entware реально работает (не просто "числится"),
@@ -182,7 +182,7 @@ curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/
 например через wget, как и `install.sh`:
 
 ```sh
-curl -fsSL uninstall.sh "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/uninstall.sh"
+wget -O uninstall.sh "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/uninstall.sh"
 sh uninstall.sh
 ```
 
@@ -558,3 +558,11 @@ CLI (`netcraze-remote-hub.py add-router --entry-port 0 --ssh-entry-port
 ... --ssh-host ... --ssh-port ...`, тот же upsert, что и веб-форма) —
 полноценная форма редактирования в панели пока не сделана, см. "На
 горизонте".
+
+### 2026-07-30 — рестарт dropbear в автозапуске
+На реальном устройстве после перезагрузки dropbear (SSH) сам по себе
+не поднимался корректно без ручного рестарта. В `S99netcraze-remote`
+(секция `start`) добавлен явный `/opt/etc/init.d/S51dropbear restart`
+перед запуском агента — с проверкой существования файла, чтобы не
+сломать автозапуск на устройствах, где путь/имя скрипта dropbear
+отличается.
