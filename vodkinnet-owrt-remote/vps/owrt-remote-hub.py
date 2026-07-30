@@ -1056,6 +1056,13 @@ def init_db(conn):
                 "update routers set ssh_vless_uuid = ?, ssh_reverse_tag = ? where id = ?",
                 (ssh_uuid, ssh_tag, row["id"]),
             )
+    # VodkinNET: уникальный per-router токен вместо одного общего секрета
+    # на весь флот. Пустая строка по умолчанию для УЖЕ существующих строк —
+    # такие роутеры продолжают работать по старому общему agent_token()
+    # (см. do_POST /api/heartbeat), не нужно ничего менять на уже
+    # развёрнутых устройствах. Токен генерируется только для новых
+    # роутеров и для тех, кому явно нажали "перевыпустить".
+    ensure_column(conn, "routers", "agent_token", "text not null default ''")
     conn.commit()
 
 
@@ -1067,6 +1074,26 @@ def ensure_column(conn, table, column, definition):
 
 def get_router(conn, router_id):
     return conn.execute("select * from routers where id = ?", (router_id,)).fetchone()
+
+
+def get_router_by_agent_token(conn, token):
+    # VodkinNET: список роутеров с непустым agent_token обычно небольшой
+    # (это одна инсталляция флота, не публичный сервис) — SQL-скан не
+    # раскрывает ничего по времени выполнения; само сравнение значений —
+    # constant-time через secrets.compare_digest.
+    if not token:
+        return None
+    try:
+        token.encode("ascii")
+    except UnicodeEncodeError:
+        # secrets.compare_digest() требует ASCII/bytes — заголовок
+        # Authorization может прислать кто угодно с чем угодно, падать
+        # с 500 на мусорный ввод не нужно, это просто "не совпало".
+        return None
+    for row in conn.execute("select * from routers where agent_token != ''").fetchall():
+        if secrets.compare_digest(row["agent_token"], token):
+            return row
+    return None
 
 
 def get_router_by_entry_port(conn, entry_port, exclude_id=""):
@@ -1145,6 +1172,18 @@ def upsert_router(conn, values):
     ssh_vless_uuid = values.get("ssh_vless_uuid") or (current["ssh_vless_uuid"] if current and current["ssh_vless_uuid"] else str(uuid.uuid4()))
     ssh_reverse_tag = values.get("ssh_reverse_tag") or (current["ssh_reverse_tag"] if current and current["ssh_reverse_tag"] else f"{reverse_tag}-ssh")
 
+    # VodkinNET: новые роутеры сразу получают свой уникальный agent_token
+    # (не полагаемся на общий секрет флота). Уже существующие роутеры
+    # сохраняют то, что у них уже записано (пусто для старых, если ещё не
+    # перевыпускали) — не ломаем то, что уже физически развёрнуто на
+    # устройстве. Перевыпуск — только по явному флагу.
+    if values.get("regenerate_agent_token"):
+        agent_token_value = secrets.token_urlsafe(32)
+    elif current:
+        agent_token_value = current["agent_token"] or ""
+    else:
+        agent_token_value = secrets.token_urlsafe(32)
+
     payload = {
         "id": router_id,
         "name": values.get("name") or router_id,
@@ -1165,6 +1204,7 @@ def upsert_router(conn, values):
         "ssh_reverse_tag": ssh_reverse_tag,
         "ssh_host": strip_cidr(keep_str("ssh_host", "")),
         "ssh_port": keep_int("ssh_port", 22),
+        "agent_token": agent_token_value,
         "updated_at": ts,
     }
     if current:
@@ -1189,6 +1229,7 @@ def upsert_router(conn, values):
                 ssh_reverse_tag = :ssh_reverse_tag,
                 ssh_host = :ssh_host,
                 ssh_port = :ssh_port,
+                agent_token = :agent_token,
                 updated_at = :updated_at
             where id = :id
             """,
@@ -1202,13 +1243,13 @@ def upsert_router(conn, values):
                 id, name, role, entry_port, vps_host, vless_port, vless_uuid,
                 vless_encryption, vless_decryption, vless_flow, reverse_tag,
                 public_url, admin_host, admin_port, ssh_entry_port, ssh_vless_uuid,
-                ssh_reverse_tag, ssh_host, ssh_port,
+                ssh_reverse_tag, ssh_host, ssh_port, agent_token,
                 created_at, updated_at
             ) values (
                 :id, :name, :role, :entry_port, :vps_host, :vless_port, :vless_uuid,
                 :vless_encryption, :vless_decryption, :vless_flow, :reverse_tag,
                 :public_url, :admin_host, :admin_port, :ssh_entry_port, :ssh_vless_uuid,
-                :ssh_reverse_tag, :ssh_host, :ssh_port,
+                :ssh_reverse_tag, :ssh_host, :ssh_port, :agent_token,
                 :created_at, :updated_at
             )
             """,
@@ -1497,7 +1538,7 @@ def make_openwrt_config(row, hub_url):
         f"uci set owrtremote.main.router_name='{sh_quote(row['name'])}'",
         f"uci set owrtremote.main.role='{sh_quote(row['role'])}'",
         f"uci set owrtremote.main.hub_url='{sh_quote(hub_url)}'",
-        f"uci set owrtremote.main.hub_token='{sh_quote(agent_token())}'",
+        f"uci set owrtremote.main.hub_token='{sh_quote(row['agent_token'] or agent_token())}'",
         "uci set owrtremote.main.heartbeat_interval='30'",
         # VodkinNET: don't hardcode a static xray_bin path here - install.sh
         # already detects where it actually installed Xray (/tmp/owrt-xray on
@@ -3416,9 +3457,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def agent_ok(self):
         auth = self.headers.get("Authorization", "")
-        if auth.startswith("Bearer "):
-            return secrets.compare_digest(auth[7:].strip(), self.app.agent_token)
-        return False
+        if not auth.startswith("Bearer "):
+            return False
+        token = auth[7:].strip()
+        try:
+            token.encode("ascii")
+        except UnicodeEncodeError:
+            return False
+        return secrets.compare_digest(token, self.app.agent_token)
 
     def send_bytes(self, status, body, content_type="text/plain; charset=utf-8", extra_headers=None):
         self.close_connection = True
@@ -4160,11 +4206,29 @@ class Handler(BaseHTTPRequestHandler):
             self.ssh_session_action(path)
             return
         if path == "/api/heartbeat":
-            if not self.agent_ok():
+            # VodkinNET: сначала пробуем найти роутер по ЕГО СОБСТВЕННОМУ
+            # agent_token (уникальному на каждый роутер) — если совпал,
+            # ID роутера берём из найденной записи, а не из тела запроса,
+            # это исключает подмену чужого ID даже с валидным собственным
+            # токеном. Если совпадения нет (например, роутер ещё не
+            # мигрировал на свой токен) — падаем на старый общий
+            # agent_token() для обратной совместимости с уже
+            # развёрнутыми устройствами, которые не нужно трогать руками.
+            auth = self.headers.get("Authorization", "")
+            bearer = auth[7:].strip() if auth.startswith("Bearer ") else ""
+            matched_router_id = None
+            if bearer:
+                with self.app.conn() as conn:
+                    matched = get_router_by_agent_token(conn, bearer)
+                if matched:
+                    matched_router_id = matched["id"]
+            if matched_router_id is None and not self.agent_ok():
                 self.send_json(401, {"ok": False, "error": "bad agent token"})
                 return
             try:
                 payload = self.read_payload()
+                if matched_router_id is not None:
+                    payload["id"] = matched_router_id
                 with self.app.conn() as conn:
                     router = heartbeat(conn, payload)
                 self.send_json(200, {"ok": True, "router": router})
