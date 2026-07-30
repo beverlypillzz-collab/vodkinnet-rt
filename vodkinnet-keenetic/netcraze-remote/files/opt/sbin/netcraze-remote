@@ -272,29 +272,42 @@ ssh_running() {
 # конфига надёжнее, чем самоуправляемый pidfile: переживает внешний
 # рестарт/ручной запуск и не путается со stale pidfile после краша.
 
+# VodkinNET: собственный, выделенный путь под ЭТОТ агент — никогда не
+# сканируем общие пути вида /opt/sbin/xray, /opt/bin/xray и т.п., там
+# может стоять СОВСЕМ ДРУГОЙ Xray (например, для XKeen — так и было на
+# реальном устройстве: /opt/sbin/xray оказался версии 26.7.11 от
+# XKeen/opkg с подтверждённой upstream-регрессией в VLESS Reverse Proxy,
+# агент бездумно его подхватил вместо своей отдельной, проверенной
+# копии). Полностью независимая, никак не пересекающаяся с чем-либо ещё
+# на устройстве копия — не трогаем и не путаем с чужими установками.
+NETCRAZE_XRAY_BIN="/opt/sbin/netcraze-remote-xray"
+
 xray_bin_path() {
-	local configured candidate
+	local configured
 	configured="$(conf_get XRAY_BIN '')"
 	if [ -n "$configured" ] && [ -x "$configured" ]; then
 		printf '%s' "$configured"
 		return 0
 	fi
-	for candidate in \
-		/opt/sbin/xray /opt/bin/xray /opt/usr/bin/xray /opt/usr/sbin/xray \
-		/opt/sbin/xray-core /opt/bin/xray-core /opt/usr/bin/xray-core /opt/usr/sbin/xray-core \
-		/opt/tmp/xray /opt/tmp/xray-core
-	do
-		if [ -x "$candidate" ]; then
-			printf '%s' "$candidate"
-			return 0
-		fi
-	done
-	candidate="$(command -v xray 2>/dev/null || command -v xray-core 2>/dev/null || true)"
-	if [ -n "$candidate" ] && [ -x "$candidate" ]; then
-		printf '%s' "$candidate"
+	if [ -x "$NETCRAZE_XRAY_BIN" ] && xray_version_matches "$NETCRAZE_XRAY_BIN"; then
+		printf '%s' "$NETCRAZE_XRAY_BIN"
 		return 0
 	fi
 	return 1
+}
+
+# VodkinNET: проверяем не просто "исполняемый файл существует", а что
+# он реально отвечает НУЖНОЙ зафиксированной версией — иначе устаревшая/
+# случайно оставшаяся после сбойного скачивания копия молча использовалась
+# бы вместо переустановки на верную версию.
+xray_version_matches() {
+	local bin="$1" out
+	[ -x "$bin" ] || return 1
+	out="$("$bin" version 2>/dev/null | head -n1)"
+	case "$out" in
+		"Xray ${PINNED_XRAY_VERSION} "*) return 0 ;;
+		*) return 1 ;;
+	esac
 }
 
 # VodkinNET: зафиксированная версия Xray-core — качаем именно её с GitHub
@@ -330,7 +343,7 @@ ensure_xray_available() {
 	fi
 	require_entware
 	asset="$(xray_release_asset)" || die "неизвестная архитектура ($(uname -m)) — не знаю какой релиз Xray-core качать"
-	log "Xray не найден, качаю фиксированную версию v${PINNED_XRAY_VERSION} (${asset}) с GitHub..."
+	log "Нужна отдельная копия Xray-core v${PINNED_XRAY_VERSION} для агента (не найдена или не той версии) — качаю ${asset} с GitHub..."
 	url="https://github.com/XTLS/Xray-core/releases/download/v${PINNED_XRAY_VERSION}/${asset}"
 	dgst_url="${url}.dgst"
 	tmp_zip="${TMPDIR:-/opt/tmp}/xray-release.zip"
@@ -355,13 +368,13 @@ ensure_xray_available() {
 	fi
 
 	unzip -o -q "$tmp_zip" -d "${TMPDIR:-/opt/tmp}/xray-release-extracted" xray || die "не смог распаковать $tmp_zip"
-	mkdir -p /opt/sbin
-	mv -f "${TMPDIR:-/opt/tmp}/xray-release-extracted/xray" /opt/sbin/xray
-	chmod +x /opt/sbin/xray
+	mkdir -p "$(dirname "$NETCRAZE_XRAY_BIN")"
+	mv -f "${TMPDIR:-/opt/tmp}/xray-release-extracted/xray" "$NETCRAZE_XRAY_BIN"
+	chmod +x "$NETCRAZE_XRAY_BIN"
 	rm -rf "$tmp_zip" "$tmp_dgst" "${TMPDIR:-/opt/tmp}/xray-release-extracted"
 
-	xray_bin_path >/dev/null 2>&1 || die "xray-core скачан, но бинарь не найден по известным путям"
-	ok "Xray-core v${PINNED_XRAY_VERSION} установлен: /opt/sbin/xray"
+	xray_bin_path >/dev/null 2>&1 || die "xray-core скачан в $NETCRAZE_XRAY_BIN, но не проходит проверку версии — что-то пошло не так"
+	ok "Xray-core v${PINNED_XRAY_VERSION} установлен отдельной копией: $NETCRAZE_XRAY_BIN (не трогает никакой другой Xray на устройстве, если он есть)"
 }
 
 xray_pids() {
