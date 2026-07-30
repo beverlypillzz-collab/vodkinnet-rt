@@ -297,15 +297,66 @@ xray_bin_path() {
 	return 1
 }
 
+# VodkinNET: зафиксированная версия Xray-core — качаем именно её с GitHub
+# (с проверкой чексуммы), а не что попало из opkg. На практике версия из
+# opkg-фида и версия, которую качает install-vps.sh на VPS, разъехались
+# (26.3.27 на VPS против 26.7.11 на роутере через opkg) — реверс-туннель
+# принимал соединение и молча зависал навсегда без единой ошибки
+# (протокольная несовместимость версий). Держим ОДНУ версию везде.
+PINNED_XRAY_VERSION="26.7.11"
+
+xray_release_asset() {
+	case "$(uname -m)" in
+		aarch64|arm64) printf 'Xray-linux-arm64-v8a.zip' ;;
+		armv7l|armv7) printf 'Xray-linux-arm32-v7a.zip' ;;
+		armv6l) printf 'Xray-linux-arm32-v6.zip' ;;
+		mips64) printf 'Xray-linux-mips64.zip' ;;
+		mips) printf 'Xray-linux-mips32.zip' ;;
+		x86_64|amd64) printf 'Xray-linux-64.zip' ;;
+		i386|i686) printf 'Xray-linux-32.zip' ;;
+		*) return 1 ;;
+	esac
+}
+
 ensure_xray_available() {
+	local asset url dgst_url tmp_zip tmp_dgst expected actual
 	if xray_bin_path >/dev/null 2>&1; then
 		return 0
 	fi
 	require_entware
-	log "Xray не найден, пробую поставить через opkg (пакет xray-core)..."
-	opkg update >/dev/null 2>&1
-	opkg install xray-core || die "не удалось поставить xray-core через opkg"
-	xray_bin_path >/dev/null 2>&1 || die "xray-core поставлен, но бинарь не найден по известным путям"
+	asset="$(xray_release_asset)" || die "неизвестная архитектура ($(uname -m)) — не знаю какой релиз Xray-core качать"
+	log "Xray не найден, качаю фиксированную версию v${PINNED_XRAY_VERSION} (${asset}) с GitHub..."
+	url="https://github.com/XTLS/Xray-core/releases/download/v${PINNED_XRAY_VERSION}/${asset}"
+	dgst_url="${url}.dgst"
+	tmp_zip="${TMPDIR:-/opt/tmp}/xray-release.zip"
+	tmp_dgst="${TMPDIR:-/opt/tmp}/xray-release.zip.dgst"
+	mkdir -p "$(dirname "$tmp_zip")"
+
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL -o "$tmp_zip" "$url" || die "не смог скачать $url"
+		curl -fsSL -o "$tmp_dgst" "$dgst_url" || die "не смог скачать $dgst_url"
+	else
+		wget -q -O "$tmp_zip" "$url" || die "не смог скачать $url"
+		wget -q -O "$tmp_dgst" "$dgst_url" || die "не смог скачать $dgst_url"
+	fi
+
+	expected="$(sed -n 's/.*256= *\([0-9a-fA-F]*\).*/\1/p' "$tmp_dgst" | head -n1)"
+	actual="$(sha256sum "$tmp_zip" 2>/dev/null | awk '{print $1}')"
+	[ -n "$expected" ] || die "не смог прочитать ожидаемую чексумму из $tmp_dgst"
+	[ -n "$actual" ] || die "не смог посчитать чексумму скачанного файла (нет sha256sum?)"
+	if [ "$expected" != "$actual" ]; then
+		rm -f "$tmp_zip" "$tmp_dgst"
+		die "чексумма Xray-core не совпала (ожидалось $expected, получено $actual) — установка прервана"
+	fi
+
+	unzip -o -q "$tmp_zip" -d "${TMPDIR:-/opt/tmp}/xray-release-extracted" xray || die "не смог распаковать $tmp_zip"
+	mkdir -p /opt/sbin
+	mv -f "${TMPDIR:-/opt/tmp}/xray-release-extracted/xray" /opt/sbin/xray
+	chmod +x /opt/sbin/xray
+	rm -rf "$tmp_zip" "$tmp_dgst" "${TMPDIR:-/opt/tmp}/xray-release-extracted"
+
+	xray_bin_path >/dev/null 2>&1 || die "xray-core скачан, но бинарь не найден по известным путям"
+	ok "Xray-core v${PINNED_XRAY_VERSION} установлен: /opt/sbin/xray"
 }
 
 xray_pids() {
@@ -733,7 +784,7 @@ doctor() {
 	if xray_bin_path >/dev/null 2>&1; then
 		ok "xray бинарь: $(xray_bin_path)"
 	else
-		printf '%b[!!]%b xray-core не найден (opkg install xray-core)\n' "$C_RED" "$C_NC"
+		printf '%b[!!]%b xray-core не найден (запусти netcraze-remote start — скачает автоматически)\n' "$C_RED" "$C_NC"
 		ok_all=0
 	fi
 
