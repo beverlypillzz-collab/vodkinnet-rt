@@ -1241,24 +1241,18 @@ def upsert_router(conn, values):
 
 
 def heartbeat(conn, payload):
+    # VodkinNET: раньше при heartbeat от неизвестного router_id роутер
+    # молча АВТОСОЗДАВАЛСЯ заново — это прямо противоречило
+    # задокументированному принципу ("флот нельзя пополнить извне без
+    # доступа к панели") и было причиной реального бага: удаляешь роутер
+    # в панели, а через ~30 сек (следующий heartbeat от всё ещё живого
+    # агента на устройстве) он воскресает сам собой. Теперь неизвестный
+    # router_id просто отклоняется — регистрация только руками в панели.
     router_id = clean_router_id(payload.get("id"))
     row = get_router(conn, router_id)
-    ts = now_ts()
     if not row:
-        row = upsert_router(
-            conn,
-            {
-                "id": router_id,
-                "name": payload.get("name") or router_id,
-                "role": payload.get("role") or "node",
-                "entry_port": payload.get("entry_port") or 0,
-                "vps_host": payload.get("vps_host") or "",
-                "admin_host": payload.get("admin_host") or "",
-                "admin_port": payload.get("admin_port") or 80,
-                "ssh_host": payload.get("ssh_host") or "",
-                "ssh_port": payload.get("ssh_port") or 22,
-            },
-        )
+        raise ValueError(f"router '{router_id}' не зарегистрирован в панели — сначала добавь его в Hub")
+    ts = now_ts()
     conn.execute(
         """
         update routers set
