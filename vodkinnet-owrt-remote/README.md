@@ -870,3 +870,25 @@ wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/m
 <img src="https://capsule-render.vercel.app/api?type=waving&color=0:0a0603,45:e01e1e,100:ff6a00&height=120&section=footer" alt="Footer" width="100%" />
 
 </div>
+
+### 2026-07-31 — миграция на nginx-прокси + секретный путь в URL
+
+Найдено при живой security-ревизии: приложение слушало `0.0.0.0` со
+своим **встроенным TLS напрямую наружу**, полностью в обход nginx —
+из-за двух конфликтующих systemd drop-in'ов от более ранней
+недоделанной попытки фикса (`https.conf` пытался выключить встроенный
+TLS, но следующий по алфавиту `tls.conf` включал его обратно). Кроме
+того, симлинка `/etc/nginx/sites-enabled/owrt-remote` не существовало
+вовсе — файл в `sites-available` никогда реально не подключался.
+
+**Исправлено и на живом VPS, и в самом install-vps.sh** (чтобы не
+откатилось при следующей переустановке):
+- `owrt-remote.service`: `OWRT_REMOTE_BIND` теперь `127.0.0.1` вместо
+  `0.0.0.0` — приложение больше не торчит наружу напрямую.
+- Новая функция `setup_nginx_vhost()` — генерирует секретный путь в
+  URL (голый `/` отдаёт `404`, остальное работает как обычно),
+  настраивает nginx-vhost с TLS (переиспользует сертификат, уже
+  полученный через `enable_https`/certbot), включает симлинк в
+  `sites-enabled`, которого раньше не было.
+- Секретный путь сохраняется в `/etc/owrt-remote-secret-path.txt` на
+  случай, если забудется.
