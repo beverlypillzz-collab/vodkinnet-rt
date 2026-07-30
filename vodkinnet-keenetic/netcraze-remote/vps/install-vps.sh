@@ -162,7 +162,17 @@ if [ ! -x "$XRAY_BIN" ]; then
 		*) err "неизвестная архитектура $ARCH, поставь Xray вручную в $XRAY_BIN"; exit 1 ;;
 	esac
 
-	XRAY_DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/latest/download/${XRAY_ASSET}"
+	# VodkinNET: НЕ releases/latest — зафиксированная версия. На практике
+	# releases/latest в какой-то момент отдал v26.7.11, у которого есть
+	# подтверждённая (upstream issue XTLS/Xray-core #6242) регрессия в
+	# VLESS Reverse Proxy: соединение принимается и диспетчеризуется через
+	# mux, а дальше зависает навсегда без единой ошибки — именно это и
+	# наблюдалось на реальном устройстве. v26.3.27 подтверждённо рабочая
+	# версия (это ровно та версия, что уже стоит и работает у owrt-remote
+	# на этом же VPS) — держим её явно, а не полагаемся на "какой будет
+	# latest в момент установки".
+	XRAY_VERSION="26.3.27"
+	XRAY_DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/${XRAY_ASSET}"
 	curl -fsSL -o "$TMP_DIR/xray.zip" "$XRAY_DOWNLOAD_URL"
 	# VodkinNET: у Xray-core НЕТ единого SHA256SUMS на релиз — у каждого
 	# ассета свой файл проверки "<имя>.dgst" с полями MD5=/SHA1=/SHA256=/
