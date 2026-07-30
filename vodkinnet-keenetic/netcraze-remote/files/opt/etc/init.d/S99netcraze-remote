@@ -10,6 +10,15 @@ AGENT="/opt/sbin/netcraze-remote"
 
 case "${1:-start}" in
 	start)
+		# VodkinNET: на этом устройстве dropbear (SSH) сам по себе не
+		# поднимается корректно после загрузки — нужен явный рестарт.
+		# Проверяем, что скрипт реально существует, прежде чем звать его,
+		# чтобы не сломать собственный автозапуск на других устройствах,
+		# где путь/имя может отличаться.
+		if [ -x /opt/etc/init.d/S51dropbear ]; then
+			/opt/etc/init.d/S51dropbear restart 2>/dev/null || true
+		fi
+
 		if [ ! -f "$ENABLE" ]; then
 			echo "netcraze-remote: конфиг не найден ($ENABLE) — пропускаю автозапуск, см. .conf.example"
 			exit 0
