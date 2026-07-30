@@ -1983,10 +1983,12 @@ input,select{{min-width:0;border:1px solid var(--line);border-radius:8px;padding
     <input name="id" placeholder="router id: node-2" autocomplete="off" required>
     <input name="name" placeholder="Название роутера" required>
     <select name="role"><option value="node">node</option><option value="main">main</option></select>
-    <input name="entry_port" placeholder="18080" inputmode="numeric" required>
+    <input name="entry_port" placeholder="Порт админки (необязательно, для NDMS обычно не работает)" inputmode="numeric">
+    <input name="ssh_entry_port" placeholder="SSH-порт (необязательно, обычно нужен именно он)" inputmode="numeric">
     <input name="vps_host" placeholder="VPS IP/domain" required>
     <button class="primary">Добавить</button>
   </form>
+  <p class="muted" style="margin:6px 0 0">Нужно указать хотя бы один порт (обычно достаточно только SSH) — оба сразу пустыми оставить нельзя.</p>
   <div id="routerMsg" class="formMsg" hidden></div>
   </div>
 
@@ -2292,7 +2294,14 @@ function fillRouterForm(force = false) {{
   const id = nextRouterId(list);
   if (force || !routerForm.id.value) routerForm.id.value = id;
   if (force || !routerForm.name.value) routerForm.name.value = defaultRouterName(routerForm.id.value || id);
-  if (force || !routerForm.entry_port.value) routerForm.entry_port.value = String(nextEntryPort(list));
+  // VodkinNET: admin-канал (веб-морда) больше не предлагается по умолчанию —
+  // для NDMS он подтверждённо не работает (Basic Auth не переживает
+  // проксирование через другой origin), кнопка "Админка" убрана из
+  // интерфейса. Раньше именно эта авто-подстановка (для entry_port) была
+  // причиной того, что admin-канал сам собой "включался обратно" при
+  // каждом повторном открытии формы для уже существующего роутера.
+  // Вместо этого предлагаем свободный SSH-порт — это основной канал.
+  if (force || !routerForm.ssh_entry_port.value) routerForm.ssh_entry_port.value = String(nextEntryPort(list) + 1000);
   if (force || !routerForm.vps_host.value) routerForm.vps_host.value = defaultVpsHost(list);
   if (force || !routerForm.role.value) routerForm.role.value = id === 'main' ? 'main' : 'node';
 }}
@@ -2367,22 +2376,26 @@ routerForm.addEventListener('submit', async (ev) => {{
   const body = new URLSearchParams(new FormData(ev.currentTarget));
   const id = String(body.get('id') || '').trim();
   const entryPort = Number(body.get('entry_port') || 0);
-  const sshEntryPort = entryPort + 1000;
+  const sshEntryPort = Number(body.get('ssh_entry_port') || 0);
   const duplicateId = (window.ROUTERS || []).find(r => String(r.id) === id);
-  const duplicatePort = (window.ROUTERS || []).find(r => Number(r.entry_port || 0) === entryPort || Number(r.ssh_entry_port || 0) === entryPort);
-  const duplicateSshPort = (window.ROUTERS || []).find(r => Number(r.entry_port || 0) === sshEntryPort || Number(r.ssh_entry_port || 0) === sshEntryPort);
+  const duplicatePort = entryPort > 0 && (window.ROUTERS || []).find(r => Number(r.entry_port || 0) === entryPort || Number(r.ssh_entry_port || 0) === entryPort);
+  const duplicateSshPort = sshEntryPort > 0 && (window.ROUTERS || []).find(r => Number(r.entry_port || 0) === sshEntryPort || Number(r.ssh_entry_port || 0) === sshEntryPort);
   if (duplicateId) {{
     showRouterMsg(`Router ID "${{id}}" уже есть. Для второго роутера оставь предложенный ID или напиши новый.`, true);
     return;
   }}
+  if (entryPort <= 0 && sshEntryPort <= 0) {{
+    showRouterMsg('Нужно указать хотя бы один порт: admin (веб-морда) или SSH — оба сразу пустыми быть не могут.', true);
+    return;
+  }}
   if (duplicatePort) {{
-    showRouterMsg(`Порт ${{entryPort}} уже занят роутером "${{duplicatePort.id}}". Поставь следующий свободный порт.`, true);
+    showRouterMsg(`Порт ${{entryPort}} уже занят роутером "${{duplicatePort.id}}". Поставь другой порт.`, true);
     routerForm.entry_port.value = String(nextEntryPort(window.ROUTERS || []));
     return;
   }}
   if (duplicateSshPort) {{
-    showRouterMsg(`SSH-порт ${{sshEntryPort}} уже занят роутером "${{duplicateSshPort.id}}". Поставь другой entry port.`, true);
-    routerForm.entry_port.value = String(nextEntryPort(window.ROUTERS || []));
+    showRouterMsg(`SSH-порт ${{sshEntryPort}} уже занят роутером "${{duplicateSshPort.id}}". Поставь другой SSH-порт.`, true);
+    routerForm.ssh_entry_port.value = String(nextEntryPort(window.ROUTERS || []) + 1000);
     return;
   }}
   const res = await fetch('/api/router', {{method: 'POST', body}});
