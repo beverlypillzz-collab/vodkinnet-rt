@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+
+# VodkinNET: никогда не коммитить реальные развёрнутые значения/секреты
+.env
+*.env
+.env.*
+*.local.sh
+secrets/
+*.db
+hub.db
+*netcraze-remote-client.json
+xray-client.json
+/etc/
+*.pem
+*.key
+secret-path.txt
+hub-login.txt
