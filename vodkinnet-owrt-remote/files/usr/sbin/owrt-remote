@@ -282,24 +282,37 @@ ssh_running() {
 }
 
 xray_bin_path() {
-	local configured candidate
-	configured="$(uci_get xray_bin /usr/bin/xray)"
-	if [ -x "$configured" ]; then
+	local configured
+	configured="$(uci_get xray_bin '')"
+	if [ -n "$configured" ] && xray_version_matches "$configured"; then
 		printf '%s' "$configured"
 		return
 	fi
-	for candidate in /usr/bin/xray /usr/bin/xray-core /usr/local/bin/xray /opt/bin/xray /tmp/owrt-xray/xray /tmp/owrt-xray/xray_softfloat /tmp/xray /tmp/xray_softfloat; do
-		if [ -x "$candidate" ]; then
-			printf '%s' "$candidate"
-			return
-		fi
-	done
-	candidate="$(command -v xray 2>/dev/null || command -v xray-core 2>/dev/null || true)"
-	if [ -n "$candidate" ] && [ -x "$candidate" ]; then
-		printf '%s' "$candidate"
-		return
-	fi
-	printf '%s' "$configured"
+	# VodkinNET: НЕ сканируем общие системные пути (/usr/bin/xray,
+	# /opt/bin/xray и т.п.) — там может стоять СОВСЕМ ДРУГОЙ Xray для
+	# какой-то ещё цели на устройстве, и версия совпадать не обязана.
+	# Найдено на практике (аналогичный агент для Keenetic): общий путь
+	# оказался занят Xray от XKeen с подтверждённой upstream-регрессией
+	# в VLESS Reverse Proxy — агент бездумно его подхватил. Требуем
+	# ТОЧНОЕ совпадение зафиксированной версии, а не просто "исполняемый
+	# файл существует по любому известному пути".
+	return 1
+}
+
+# VodkinNET: зафиксированная версия Xray-core (та же, что и подтверждённо
+# работает на VPS-стороне этого же проекта) вместо releases/latest —
+# см. upstream issue XTLS/Xray-core#6242, регрессия в VLESS Reverse
+# Proxy начиная с v26.5+.
+OWRT_REMOTE_PINNED_XRAY_VERSION="26.3.27"
+
+xray_version_matches() {
+	local bin="$1" out
+	[ -x "$bin" ] || return 1
+	out="$("$bin" version 2>/dev/null | head -n1)"
+	case "$out" in
+		"Xray ${OWRT_REMOTE_PINNED_XRAY_VERSION} "*) return 0 ;;
+		*) return 1 ;;
+	esac
 }
 
 # VodkinNET: same Fastly-IP-pool issue as install.sh's fetch() - a specific
@@ -914,14 +927,20 @@ ensure_fetch_tool() {
 }
 
 install_xray_tmp() {
-	local dir zip asset url version entry candidates
+	local dir zip dgst asset url dgst_url version entry candidates expected actual
 	dir="/tmp/owrt-xray"
 	zip="$dir/xray.zip"
+	dgst="$dir/xray.zip.dgst"
 	asset="$(xray_release_asset)" || {
 		log "unknown Xray asset for $(uname -m 2>/dev/null)"
 		return 1
 	}
-	url="https://github.com/XTLS/Xray-core/releases/latest/download/$asset"
+	# VodkinNET: зафиксированная версия вместо releases/latest — см.
+	# upstream issue XTLS/Xray-core#6242 (регрессия в VLESS Reverse Proxy
+	# начиная с v26.5+, найдено на практике и подтверждено сравнением с
+	# уже стабильно работающей версией на VPS-стороне этого же проекта).
+	url="https://github.com/XTLS/Xray-core/releases/download/v${OWRT_REMOTE_PINNED_XRAY_VERSION}/$asset"
+	dgst_url="${url}.dgst"
 
 	mkdir -p /var/lock /var/run "$dir"
 	if ! command -v unzip >/dev/null 2>&1; then
@@ -936,8 +955,8 @@ install_xray_tmp() {
 		return 1
 	}
 
-	printf '%b[*]%b Скачиваю Xray: %s\n' "$C_CYAN" "$C_NC" "$asset"
-	rm -f "$zip" "$dir/xray" "$dir/xray_softfloat"
+	printf '%b[*]%b Скачиваю Xray v%s: %s\n' "$C_CYAN" "$C_NC" "$OWRT_REMOTE_PINNED_XRAY_VERSION" "$asset"
+	rm -f "$zip" "$dgst" "$dir/xray" "$dir/xray_softfloat"
 	fetch_file "$url" "$zip" || {
 		log "cannot download Xray: $url"
 		return 1
@@ -947,7 +966,19 @@ install_xray_tmp() {
 		rm -f "$zip"
 		return 1
 	}
-	ok "Xray скачан ($(wc -c <"$zip" 2>/dev/null || echo '?') байт)"
+	fetch_file "$dgst_url" "$dgst" || {
+		log "cannot download checksum file: $dgst_url"
+		rm -f "$zip"
+		return 1
+	}
+	expected="$(sed -n 's/.*256= *\([0-9a-fA-F]*\).*/\1/p' "$dgst" | head -n1)"
+	actual="$(sha256sum "$zip" 2>/dev/null | awk '{print $1}')"
+	if [ -z "$expected" ] || [ -z "$actual" ] || [ "$expected" != "$actual" ]; then
+		log "checksum mismatch for Xray archive (expected=$expected actual=$actual) - aborting"
+		rm -f "$zip" "$dgst"
+		return 1
+	fi
+	ok "Xray скачан и чексумма совпала ($(wc -c <"$zip" 2>/dev/null || echo '?') байт)"
 
 	candidates="xray"
 	case "$(xray_arch)" in
@@ -968,6 +999,7 @@ install_xray_tmp() {
 
 		uci set "$CONFIG.$SECTION.xray_bin=$dir/$entry"
 		uci commit "$CONFIG"
+		rm -f "$zip" "$dgst"
 		printf 'OK: Xray installed in %s\n' "$dir/$entry"
 		printf 'OK: %s\n' "$version"
 		printf 'OK: xray_bin saved in /etc/config/owrtremote\n'
@@ -975,36 +1007,20 @@ install_xray_tmp() {
 	done
 
 	log "downloaded Xray does not start"
-	rm -f "$dir/xray" "$dir/xray_softfloat"
+	rm -f "$dir/xray" "$dir/xray_softfloat" "$zip" "$dgst"
 	return 1
 }
 
 ensure_xray_available() {
-	local configured candidate found
-	configured="$(uci_get xray_bin /usr/bin/xray)"
-	[ -x "$configured" ] && return 0
-
-	for candidate in /usr/bin/xray /usr/bin/xray-core /usr/local/bin/xray /opt/bin/xray /tmp/owrt-xray/xray /tmp/owrt-xray/xray_softfloat /tmp/xray /tmp/xray_softfloat; do
-		if [ -x "$candidate" ]; then
-			found="$candidate"
-			break
-		fi
-	done
-
-	if [ -z "$found" ]; then
-		found="$(command -v xray 2>/dev/null || command -v xray-core 2>/dev/null || true)"
-	fi
-
-	if [ -n "$found" ] && [ -x "$found" ]; then
-		[ "$found" = "$configured" ] || {
-			uci set "$CONFIG.$SECTION.xray_bin=$found"
-			uci commit "$CONFIG"
-			log "Xray found: $found"
-		}
+	local configured
+	configured="$(uci_get xray_bin '')"
+	if [ -n "$configured" ] && xray_version_matches "$configured"; then
 		return 0
 	fi
 
-	log "Xray missing ($configured), reinstalling temporary Xray in /tmp..."
+	# VodkinNET: НЕ сканируем общие системные пути и не подхватываем
+	# что попало из PATH — см. комментарий в xray_bin_path() выше.
+	log "нужна отдельная копия Xray v${OWRT_REMOTE_PINNED_XRAY_VERSION} (не найдена или не той версии), качаю в /tmp..."
 	install_xray_tmp
 }
 
