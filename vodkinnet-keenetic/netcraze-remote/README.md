@@ -157,7 +157,7 @@ curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/
 в базе знаний — раздел про Entware/OPKG на этой прошивке).
 
 ```sh
-wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/install.sh?v=$(date +%s)" | sh
+curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/install.sh?v=$(date +%s)" | sh
 ```
 
 Скрипт сам проверит, что Entware реально работает (не просто "числится"),
@@ -182,7 +182,7 @@ wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/m
 например через wget, как и `install.sh`:
 
 ```sh
-wget -O uninstall.sh "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/uninstall.sh"
+curl -fsSL uninstall.sh "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/uninstall.sh"
 sh uninstall.sh
 ```
 
