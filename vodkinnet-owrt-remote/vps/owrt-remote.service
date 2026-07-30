@@ -5,7 +5,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-Environment=OWRT_REMOTE_BIND=0.0.0.0
+# VodkinNET: только localhost — внешний TLS и секретный путь в URL берёт
+# на себя nginx (см. install-vps.sh setup_nginx_vhost), приложение само
+# наружу не торчит. Раньше тут стоял 0.0.0.0 со встроенным TLS самого
+# приложения напрямую наружу — найдено и исправлено при живой миграции,
+# теперь закреплено и в самом файле юнита, чтобы не откатилось при
+# следующей переустановке.
+Environment=OWRT_REMOTE_BIND=127.0.0.1
 Environment=OWRT_REMOTE_PORT=8088
 # VodkinNET: EXTRA_PORTS=80 убран — конфликтовал с nginx-редиректом
 # vodkin.net (лендинг), который тоже слушает 80 на этом сервере. Раньше
