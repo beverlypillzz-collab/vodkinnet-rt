@@ -1312,22 +1312,49 @@ def make_server_xray_config(rows, listen_host="0.0.0.0", listen_port=DEFAULT_VLE
     for row in rows:
         router_id = clean_router_id(row["id"])
         entry_port = int(row["entry_port"] or 0)
-        if entry_port <= 0:
-            continue
         ssh_entry_port = int(row["ssh_entry_port"] or 0)
+        if entry_port <= 0 and ssh_entry_port <= 0:
+            # ни admin, ни ssh не настроены - нечего проксировать вообще
+            continue
         reverse_out = f"reverse-{router_id}"
         ssh_reverse_out = f"{reverse_out}-ssh"
         portal_in = f"entry-{router_id}"
-        client = {
-            "id": row["vless_uuid"],
-            "email": f"{router_id}@netcraze-remote",
-            "reverse": {
-                "tag": reverse_out,
-            },
-        }
-        if row["vless_flow"]:
-            client["flow"] = row["vless_flow"]
-        clients.append(client)
+
+        # VodkinNET: admin-канал (веб-морда) теперь независимо опционален —
+        # раньше entry_port<=0 пропускал весь роутер целиком, включая SSH.
+        # Нужно для случаев "управляем роутером только по SSH (Entware),
+        # веб-морду NDMS через Hub вообще не выдаём".
+        if entry_port > 0:
+            client = {
+                "id": row["vless_uuid"],
+                "email": f"{router_id}@netcraze-remote",
+                "reverse": {
+                    "tag": reverse_out,
+                },
+            }
+            if row["vless_flow"]:
+                client["flow"] = row["vless_flow"]
+            clients.append(client)
+            inbounds.append(
+                {
+                    "tag": portal_in,
+                    "listen": "127.0.0.1",
+                    "port": entry_port,
+                    "protocol": "tunnel",
+                    "settings": {
+                        "allowedNetwork": "tcp",
+                        "rewriteAddress": row["admin_host"] or "127.0.0.1",
+                        "rewritePort": int(row["admin_port"]),
+                    },
+                }
+            )
+            rules.append(
+                {
+                    "type": "field",
+                    "inboundTag": [portal_in],
+                    "outboundTag": reverse_out,
+                }
+            )
         if ssh_entry_port > 0:
             ssh_client = {
                 "id": row["ssh_vless_uuid"],
@@ -1339,27 +1366,6 @@ def make_server_xray_config(rows, listen_host="0.0.0.0", listen_port=DEFAULT_VLE
             if row["vless_flow"]:
                 ssh_client["flow"] = row["vless_flow"]
             clients.append(ssh_client)
-        inbounds.append(
-            {
-                "tag": portal_in,
-                "listen": "127.0.0.1",
-                "port": entry_port,
-                "protocol": "tunnel",
-                "settings": {
-                    "allowedNetwork": "tcp",
-                    "rewriteAddress": row["admin_host"] or "127.0.0.1",
-                    "rewritePort": int(row["admin_port"]),
-                },
-            }
-        )
-        rules.append(
-            {
-                "type": "field",
-                "inboundTag": [portal_in],
-                "outboundTag": reverse_out,
-            }
-        )
-        if ssh_entry_port > 0:
             ssh_in = f"ssh-{router_id}"
             inbounds.append(
                 {
@@ -1532,6 +1538,10 @@ def make_router_conf(row, hub_url):
     ssh_reverse_tag = f"{reverse_tag}-ssh"
     admin_host = (row["admin_host"] or "").strip() or "127.0.0.1"
     ssh_host = (row["ssh_host"] or "").strip() or "127.0.0.1"
+    entry_port = int(row["entry_port"] or 0)
+    ssh_entry_port = int(row["ssh_entry_port"] or 0)
+    admin_enabled = entry_port > 0
+    ssh_enabled = ssh_entry_port > 0
 
     lines = [
         f'ROUTER_ID="{sh_quote(row["id"])}"',
@@ -1552,18 +1562,33 @@ def make_router_conf(row, hub_url):
         f'VPS_HOST="{sh_quote(row["vps_host"])}"',
         f'VPS_PORT="{int(row["vless_port"])}"',
         f'TLS_SNI="{sh_quote(row["vps_host"])}"',
-        f'VLESS_UUID="{sh_quote(row["vless_uuid"])}"',
         f'VLESS_ENCRYPTION="{sh_quote(row["vless_encryption"])}"',
         f'VLESS_FLOW="{sh_quote(row["vless_flow"])}"',
-        f'REVERSE_TAG="{sh_quote(reverse_tag)}"',
-        f'SSH_VLESS_UUID="{sh_quote(row["ssh_vless_uuid"])}"',
-        f'SSH_REVERSE_TAG="{sh_quote(ssh_reverse_tag)}"',
-        f'ADMIN_HOST="{sh_quote(admin_host)}"',
-        f'ADMIN_PORT="{int(row["admin_port"])}"',
-        f'SSH_HOST="{sh_quote(ssh_host)}"',
-        f'SSH_PORT="{int(row["ssh_port"] or 22)}"',
-        f'PUBLIC_URL="{sh_quote(row["public_url"])}"',
     ]
+    # VodkinNET: admin (веб-морда) и ssh — независимо опциональные каналы.
+    # Пустой VLESS_UUID/SSH_VLESS_UUID — явный сигнал агенту "канал
+    # отключён, не строить для него outbound вообще" (см. render_client_config
+    # в files/opt/sbin/netcraze-remote). Нужно для случаев вроде "управляем
+    # только по SSH (Entware), веб-морду NDMS через Hub не выдаём вообще".
+    if admin_enabled:
+        lines += [
+            f'VLESS_UUID="{sh_quote(row["vless_uuid"])}"',
+            f'REVERSE_TAG="{sh_quote(reverse_tag)}"',
+            f'ADMIN_HOST="{sh_quote(admin_host)}"',
+            f'ADMIN_PORT="{int(row["admin_port"])}"',
+        ]
+    else:
+        lines += ['VLESS_UUID=""', 'REVERSE_TAG=""', 'ADMIN_HOST=""', 'ADMIN_PORT=""']
+    if ssh_enabled:
+        lines += [
+            f'SSH_VLESS_UUID="{sh_quote(row["ssh_vless_uuid"])}"',
+            f'SSH_REVERSE_TAG="{sh_quote(ssh_reverse_tag)}"',
+            f'SSH_HOST="{sh_quote(ssh_host)}"',
+            f'SSH_PORT="{int(row["ssh_port"] or 22)}"',
+        ]
+    else:
+        lines += ['SSH_VLESS_UUID=""', 'SSH_REVERSE_TAG=""', 'SSH_HOST=""', 'SSH_PORT=""']
+    lines.append(f'PUBLIC_URL="{sh_quote(row["public_url"])}"')
     return "\n".join(lines) + "\n"
 
 
@@ -4273,9 +4298,23 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_payload()
                 router_id = clean_router_id(payload.get("id"))
                 entry_port = int(payload.get("entry_port") or 0)
-                ssh_entry_port = int(payload.get("ssh_entry_port") or (entry_port + 1000))
-                if entry_port <= 0:
-                    self.send_text(400, "entry_port должен быть больше 0")
+                # VodkinNET: admin и ssh теперь независимо опциональны (см.
+                # make_server_xray_config/make_router_conf) — для случая
+                # "управляем только по SSH, веб-морду NDMS не выдаём вообще"
+                # entry_port может быть 0. Автоподстановку
+                # ssh_entry_port = entry_port+1000 делаем ТОЛЬКО если
+                # entry_port реально задан — иначе при entry_port=0 получался
+                # бы бессмысленный ssh_entry_port=1000 (низкий порт,
+                # случайная коллизия) вместо явной ошибки.
+                ssh_entry_port_raw = payload.get("ssh_entry_port")
+                if ssh_entry_port_raw not in (None, ""):
+                    ssh_entry_port = int(ssh_entry_port_raw)
+                elif entry_port > 0:
+                    ssh_entry_port = entry_port + 1000
+                else:
+                    ssh_entry_port = 0
+                if entry_port <= 0 and ssh_entry_port <= 0:
+                    self.send_text(400, "нужно указать хотя бы один порт: entry_port (веб-морда) или ssh_entry_port (SSH) — оба сразу 0 быть не могут")
                     return
                 with self.app.conn() as conn:
                     if get_router(conn, router_id):
@@ -4284,20 +4323,22 @@ class Handler(BaseHTTPRequestHandler):
                             f"Router ID '{router_id}' уже есть. Для второго роутера укажи новый ID, например node-2 или main123.",
                         )
                         return
-                    port_owner = get_router_by_any_port(conn, entry_port, router_id)
-                    if port_owner:
-                        self.send_text(
-                            409,
-                            f"entry_port {entry_port} уже занят роутером '{port_owner['id']}'. Для следующего роутера поставь другой порт, например {entry_port + 10}.",
-                        )
-                        return
-                    ssh_port_owner = get_router_by_any_port(conn, ssh_entry_port, router_id)
-                    if ssh_port_owner:
-                        self.send_text(
-                            409,
-                            f"ssh_entry_port {ssh_entry_port} уже занят роутером '{ssh_port_owner['id']}'. Поставь entry_port так, чтобы entry_port + 1000 был свободен.",
-                        )
-                        return
+                    if entry_port > 0:
+                        port_owner = get_router_by_any_port(conn, entry_port, router_id)
+                        if port_owner:
+                            self.send_text(
+                                409,
+                                f"entry_port {entry_port} уже занят роутером '{port_owner['id']}'. Для следующего роутера поставь другой порт, например {entry_port + 10}.",
+                            )
+                            return
+                    if ssh_entry_port > 0:
+                        ssh_port_owner = get_router_by_any_port(conn, ssh_entry_port, router_id)
+                        if ssh_port_owner:
+                            self.send_text(
+                                409,
+                                f"ssh_entry_port {ssh_entry_port} уже занят роутером '{ssh_port_owner['id']}'. Поставь другой ssh_entry_port.",
+                            )
+                            return
                     payload["ssh_entry_port"] = ssh_entry_port
                     row = upsert_router(conn, payload)
                     router = row_to_router(row)

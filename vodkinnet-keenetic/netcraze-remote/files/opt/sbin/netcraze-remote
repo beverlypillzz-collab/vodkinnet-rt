@@ -333,9 +333,9 @@ xray_running() {
 # --- и в vodkinnet-owrt-remote — Hub ждёт именно эти два reverse-канала) --
 
 render_client_config() {
-	local out stdout router_id vps_host vps_port uuid ssh_uuid encryption flow
-	local reverse_tag ssh_reverse_tag admin_host admin_port ssh_host ssh_port
-	local xray_config tls_sni stream_settings
+	local out stdout router_id vps_host vps_port encryption flow tls_sni stream_settings
+	local uuid ssh_uuid reverse_tag ssh_reverse_tag admin_host admin_port ssh_host ssh_port
+	local admin_enabled ssh_enabled outbounds_json rules_json xray_config
 
 	stdout="0"
 	[ "${1:-}" = "--stdout" ] && stdout="1"
@@ -343,22 +343,33 @@ render_client_config() {
 	router_id="$(safe_id "$(conf_get ROUTER_ID netcraze)")"
 	vps_host="$(conf_get VPS_HOST '')"
 	vps_port="$(safe_num "$(conf_get VPS_PORT 8444)" 8444)"
-	uuid="$(conf_get VLESS_UUID '')"
-	ssh_uuid="$(conf_get SSH_VLESS_UUID '')"
 	encryption="$(conf_get VLESS_ENCRYPTION none)"
 	flow="$(conf_get VLESS_FLOW '')"
-	reverse_tag="$(safe_id "$(conf_get REVERSE_TAG reverse-in)")"
-	ssh_reverse_tag="$(safe_id "$(conf_get SSH_REVERSE_TAG "${reverse_tag}-ssh")")"
-	admin_host="$(conf_get ADMIN_HOST "$(lan_ip_default)")"
-	admin_port="$(safe_num "$(conf_get ADMIN_PORT 80)" 80)"
-	ssh_host="$(conf_get SSH_HOST "$(lan_ip_default)")"
-	ssh_port="$(safe_num "$(conf_get SSH_PORT 22)" 22)"
 	xray_config="$(conf_get XRAY_CONFIG /opt/etc/netcraze-remote/xray-client.json)"
 	tls_sni="$(conf_get TLS_SNI '')"
 
 	[ -n "$vps_host" ] || die "VPS_HOST пустой"
-	[ -n "$uuid" ] || die "VLESS_UUID пустой"
-	[ -n "$ssh_uuid" ] || ssh_uuid="$uuid"
+
+	# VodkinNET: admin (веб-морда) и ssh — независимо опциональные каналы.
+	# Пустой VLESS_UUID/SSH_VLESS_UUID (Hub теперь явно пишет пустую строку,
+	# если канал выключен на странице роутера) означает "этот канал вообще
+	# не строить" — нужно для случаев вроде "управляем только по SSH
+	# (Entware), веб-морду NDMS через Hub вообще не выдаём".
+	uuid="$(conf_get VLESS_UUID '')"
+	reverse_tag="$(safe_id "$(conf_get REVERSE_TAG '')")"
+	admin_host="$(conf_get ADMIN_HOST "$(lan_ip_default)")"
+	admin_port="$(conf_get ADMIN_PORT '')"
+	[ -n "$uuid" ] && [ -n "$admin_port" ] && admin_enabled=1 || admin_enabled=0
+
+	ssh_uuid="$(conf_get SSH_VLESS_UUID '')"
+	ssh_reverse_tag="$(safe_id "$(conf_get SSH_REVERSE_TAG '')")"
+	ssh_host="$(conf_get SSH_HOST "$(lan_ip_default)")"
+	ssh_port="$(conf_get SSH_PORT '')"
+	[ -n "$ssh_uuid" ] && [ -n "$ssh_port" ] && ssh_enabled=1 || ssh_enabled=0
+
+	if [ "$admin_enabled" = "0" ] && [ "$ssh_enabled" = "0" ]; then
+		die "ни admin, ни ssh канал не настроены (VLESS_UUID и SSH_VLESS_UUID оба пустые) — нечего запускать"
+	fi
 
 	if [ -n "$tls_sni" ]; then
 		stream_settings="\"streamSettings\": {
@@ -377,6 +388,65 @@ render_client_config() {
 		warn "TLS_SNI пустой — реверс-канал идёт БЕЗ шифрования"
 	fi
 
+	outbounds_json=""
+	rules_json=""
+
+	if [ "$admin_enabled" = "1" ]; then
+		outbounds_json="${outbounds_json}
+    {
+      \"tag\": \"router-admin\",
+      \"protocol\": \"freedom\",
+      \"settings\": { \"redirect\": \"$(json_escape "$admin_host"):$admin_port\" }
+    },
+    {
+      \"tag\": \"vps-interconn\",
+      \"protocol\": \"vless\",
+      \"settings\": {
+        \"address\": \"$(json_escape "$vps_host")\",
+        \"port\": $vps_port,
+        \"id\": \"$(json_escape "$uuid")\",
+        \"encryption\": \"$(json_escape "$encryption")\",
+        \"flow\": \"$(json_escape "$flow")\",
+        \"reverse\": { \"tag\": \"$(json_escape "$reverse_tag")\" }
+      },
+      $stream_settings
+    },"
+		rules_json="${rules_json}
+      { \"type\": \"field\", \"inboundTag\": [\"$(json_escape "$reverse_tag")\"], \"outboundTag\": \"router-admin\" },"
+	else
+		log "admin-канал отключён (VLESS_UUID/ADMIN_PORT пустые) — веб-морда через Hub не выдаётся"
+	fi
+
+	if [ "$ssh_enabled" = "1" ]; then
+		outbounds_json="${outbounds_json}
+    {
+      \"tag\": \"router-ssh\",
+      \"protocol\": \"freedom\",
+      \"settings\": { \"redirect\": \"$(json_escape "$ssh_host"):$ssh_port\" }
+    },
+    {
+      \"tag\": \"vps-ssh-interconn\",
+      \"protocol\": \"vless\",
+      \"settings\": {
+        \"address\": \"$(json_escape "$vps_host")\",
+        \"port\": $vps_port,
+        \"id\": \"$(json_escape "$ssh_uuid")\",
+        \"encryption\": \"$(json_escape "$encryption")\",
+        \"flow\": \"$(json_escape "$flow")\",
+        \"reverse\": { \"tag\": \"$(json_escape "$ssh_reverse_tag")\" }
+      },
+      $stream_settings
+    },"
+		rules_json="${rules_json}
+      { \"type\": \"field\", \"inboundTag\": [\"$(json_escape "$ssh_reverse_tag")\"], \"outboundTag\": \"router-ssh\" },"
+	else
+		log "ssh-канал отключён (SSH_VLESS_UUID/SSH_PORT пустые)"
+	fi
+
+	# убираем висячую запятую в конце списков
+	outbounds_json="${outbounds_json%,}"
+	rules_json="${rules_json%,}"
+
 	out="${TMPDIR:-/opt/tmp}/netcraze-remote-client.$$"
 	mkdir -p "$(dirname "$out")"
 	cat >"$out" <<EOF
@@ -385,68 +455,10 @@ render_client_config() {
     "loglevel": "warning"
   },
   "inbounds": [],
-  "outbounds": [
-    {
-      "tag": "router-admin",
-      "protocol": "freedom",
-      "settings": {
-        "redirect": "$(json_escape "$admin_host"):$admin_port"
-      }
-    },
-    {
-      "tag": "router-ssh",
-      "protocol": "freedom",
-      "settings": {
-        "redirect": "$(json_escape "$ssh_host"):$ssh_port"
-      }
-    },
-    {
-      "tag": "vps-interconn",
-      "protocol": "vless",
-      "settings": {
-        "address": "$(json_escape "$vps_host")",
-        "port": $vps_port,
-        "id": "$(json_escape "$uuid")",
-        "encryption": "$(json_escape "$encryption")",
-        "flow": "$(json_escape "$flow")",
-        "reverse": {
-          "tag": "$(json_escape "$reverse_tag")"
-        }
-      },
-      $stream_settings
-    },
-    {
-      "tag": "vps-ssh-interconn",
-      "protocol": "vless",
-      "settings": {
-        "address": "$(json_escape "$vps_host")",
-        "port": $vps_port,
-        "id": "$(json_escape "$ssh_uuid")",
-        "encryption": "$(json_escape "$encryption")",
-        "flow": "$(json_escape "$flow")",
-        "reverse": {
-          "tag": "$(json_escape "$ssh_reverse_tag")"
-        }
-      },
-      $stream_settings
-    }
+  "outbounds": [${outbounds_json}
   ],
   "routing": {
-    "rules": [
-      {
-        "type": "field",
-        "inboundTag": [
-          "$(json_escape "$reverse_tag")"
-        ],
-        "outboundTag": "router-admin"
-      },
-      {
-        "type": "field",
-        "inboundTag": [
-          "$(json_escape "$ssh_reverse_tag")"
-        ],
-        "outboundTag": "router-ssh"
-      }
+    "rules": [${rules_json}
     ]
   },
   "remarks": "netcraze-remote client for $(json_escape "$router_id")"
