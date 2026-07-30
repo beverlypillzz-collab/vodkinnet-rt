@@ -260,7 +260,7 @@ ADMIN_USER="${NETCRAZE_REMOTE_ADMIN_USER:-admin}"
 # Раньше PUBLIC_URL не выставлялся вовсе, и Hub пытался угадать адрес
 # по заголовку Host входящего запроса — а nginx (Host $host, без порта)
 # обрезает порт при проксировании, так что агент получал
-# "http://hub.vodkin.net" без :7443 и без https, и heartbeat никогда
+# "http://your-domain.example" без :7443 и без https, и heartbeat никогда
 # не долетал до реального Hub'а (это было найдено на практике: карточка
 # роутера в панели вечно показывала "Оффлайн"/"waiting heartbeat").
 if [ "$EXTERNAL_HTTPS_PORT" = "443" ]; then
