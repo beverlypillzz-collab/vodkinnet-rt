@@ -215,6 +215,119 @@ enable_https() {
 	return 0
 }
 
+# VodkinNET: nginx-прокси вместо встроенного TLS приложения напрямую
+# наружу. Найдено при живой ревизии безопасности: приложение слушало
+# 0.0.0.0 со своим TLS прямо на внешнем порту — теперь только nginx
+# терминирует TLS и отдаёт секретный путь в URL (защита от automated-
+# сканеров: голый "/" отдаёт 404, без секретного сегмента панель не
+# найти). enable_https() (вызывается ДО этой функции) уже получил
+# сертификат через certbot — используем его, просто адресуем на nginx,
+# а не на встроенный TLS-листенер приложения.
+OWRT_REMOTE_EXTERNAL_HTTPS_PORT="${OWRT_REMOTE_EXTERNAL_HTTPS_PORT:-9443}"
+
+setup_nginx_vhost() {
+	host="$1"
+	if [ "$host" = "YOUR_VPS_IP" ]; then
+		warn "nginx-vhost пропущен: не смог определить IP/домен VPS"
+		return 0
+	fi
+	cert="/etc/letsencrypt/live/${host}/fullchain.pem"
+	key="/etc/letsencrypt/live/${host}/privkey.pem"
+	if [ ! -r "$cert" ] || [ ! -r "$key" ]; then
+		warn "nginx-vhost пропущен: сертификат для $host не найден ($cert) - похоже enable_https не смог его получить"
+		return 0
+	fi
+	command -v nginx >/dev/null 2>&1 || {
+		warn "nginx-vhost пропущен: nginx не установлен"
+		return 0
+	}
+
+	OWRT_REMOTE_SECRET_PATH="$(head -c 18 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 16)"
+	echo "$OWRT_REMOTE_SECRET_PATH" > /etc/owrt-remote-secret-path.txt
+	chmod 0600 /etc/owrt-remote-secret-path.txt
+
+	mkdir -p /etc/systemd/system/owrt-remote.service.d
+	cat > /etc/systemd/system/owrt-remote.service.d/nginx-proxy.conf <<DROPIN
+[Service]
+Environment=OWRT_REMOTE_BIND=127.0.0.1
+Environment=OWRT_REMOTE_TLS_CERT=
+Environment=OWRT_REMOTE_TLS_KEY=
+Environment=OWRT_REMOTE_TLS_PORTS=
+Environment=OWRT_REMOTE_PUBLIC_URL=https://${host}:${OWRT_REMOTE_EXTERNAL_HTTPS_PORT}
+DROPIN
+
+	cat > /etc/nginx/sites-available/owrt-remote <<NGINXEOF
+server {
+    listen ${OWRT_REMOTE_EXTERNAL_HTTPS_PORT} ssl http2;
+    server_name ${host};
+    ssl_certificate     ${cert};
+    ssl_certificate_key ${key};
+    client_max_body_size 64m;
+
+    location = / {
+        return 404;
+    }
+
+    location /${OWRT_REMOTE_SECRET_PATH}/ {
+        rewrite ^/${OWRT_REMOTE_SECRET_PATH}/(.*)\$ /\$1 break;
+        rewrite ^/${OWRT_REMOTE_SECRET_PATH}\$ / break;
+        proxy_pass http://127.0.0.1:8088;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host \$host;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$http_connection;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_connect_timeout 30s;
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8088;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host \$host;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$http_connection;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_connect_timeout 30s;
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+}
+NGINXEOF
+
+	# VodkinNET: используется \$http_connection (не буквальный "upgrade")
+	# для корректной поддержки и WebSocket, и обычных HTTP-запросов на
+	# одном и том же location - без map-переменной буквальный "upgrade"
+	# сломал бы обычные (не-WS) запросы. Определяем map, если его ещё нет.
+	if ! grep -rq "map \$http_upgrade \$http_connection" /etc/nginx/conf.d/ 2>/dev/null; then
+		cat > /etc/nginx/conf.d/owrt-remote-map.conf <<'MAPEOF'
+map $http_upgrade $http_connection {
+    default upgrade;
+    ''      close;
+}
+MAPEOF
+	fi
+
+	ln -sf /etc/nginx/sites-available/owrt-remote /etc/nginx/sites-enabled/owrt-remote
+	nginx -t || { warn "nginx -t не прошёл - проверь конфиг вручную, панель осталась на встроенном TLS"; return 1; }
+	$SUDO systemctl daemon-reload
+	$SUDO systemctl restart owrt-remote
+	systemctl reload nginx
+	NGINX_VHOST_OK=1
+	NGINX_VHOST_URL="https://${host}:${OWRT_REMOTE_EXTERNAL_HTTPS_PORT}/${OWRT_REMOTE_SECRET_PATH}/"
+}
+
 print_result() {
 	host="$1"
 	info ""
@@ -222,15 +335,22 @@ print_result() {
 	info "$APP_NAME установлен"
 	info "============================================================"
 	info "Панель:"
-	if [ "${HTTPS_OK:-0}" = "1" ]; then
-		info "  https://$host/"
-	fi
-	if [ "${HUB_PORT80_OK:-0}" = "1" ]; then
-		info "  http://$host/"
+	if [ "${NGINX_VHOST_OK:-0}" = "1" ]; then
+		info "  $NGINX_VHOST_URL"
+		info "  (голый https://$host:${OWRT_REMOTE_EXTERNAL_HTTPS_PORT}/ нарочно отдаёт 404 -"
+		info "   без секретного пути в адресе панель не найти; сохрани его,"
+		info "   он также записан в /etc/owrt-remote-secret-path.txt на VPS)"
 	else
-		info "  http://$host/       (порт 80 не ответил, проверь firewall или занятый порт)"
+		if [ "${HTTPS_OK:-0}" = "1" ]; then
+			info "  https://$host/"
+		fi
+		if [ "${HUB_PORT80_OK:-0}" = "1" ]; then
+			info "  http://$host/"
+		else
+			info "  http://$host/       (порт 80 не ответил, проверь firewall или занятый порт)"
+		fi
+		info "  http://$host:8088/"
 	fi
-	info "  http://$host:8088/"
 	info ""
 	info "Вход:"
 	info "  login:    $HUB_LOGIN"
@@ -317,6 +437,7 @@ main() {
 	start_hub
 	check_hub || die "Hub установлен, но сервис не поднялся. Лог выше."
 	enable_https "$host"
+	setup_nginx_vhost "$host"
 	print_result "$host"
 }
 

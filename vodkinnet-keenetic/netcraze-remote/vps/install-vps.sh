@@ -330,6 +330,14 @@ systemctl daemon-reload
 systemctl enable --now netcraze-remote-xray
 systemctl enable --now netcraze-remote-hub
 
+# --- секретный путь в URL (защита от automated-сканеров: голый "/" отдаёт
+# 404, панель не найти не зная этого сегмента; всё остальное после входа
+# продолжает работать как обычно — оно и так защищено сессией/логином) ---
+SECRET_PATH="$(head -c 18 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 16)"
+echo "$SECRET_PATH" > /etc/netcraze-remote/secret-path.txt
+chmod 0600 /etc/netcraze-remote/secret-path.txt
+chown "$SVC_USER":"$SVC_USER" /etc/netcraze-remote/secret-path.txt 2>/dev/null || true
+
 # --- nginx vhost (отдельный файл; порт 80-редирект добавляем только если
 # внешний порт для этой панели - 443, иначе на этом домене уже наверняка
 # есть свой редирект-блок 80->443 от другой панели, и второй такой же блок
@@ -355,6 +363,25 @@ server {
 
     ssl_certificate     ${CERT_PATH};
     ssl_certificate_key ${KEY_PATH};
+
+    location = / {
+        return 404;
+    }
+
+    location /${SECRET_PATH}/ {
+        rewrite ^/${SECRET_PATH}/(.*)\$ /\$1 break;
+        rewrite ^/${SECRET_PATH}\$ / break;
+        proxy_pass http://127.0.0.1:${HUB_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:${HUB_PORT};
@@ -391,10 +418,13 @@ echo
 ok "Установка Hub завершена (процессы работают от пользователя ${SVC_USER}, не root)."
 cat <<EOF
 
-  URL панели : ${PUBLIC_URL}/
+  URL панели : ${PUBLIC_URL}/${SECRET_PATH}/
   Логин      : ${ADMIN_USER}
   Пароль     : ${ADMIN_PASSWORD}
   (пароль показывается один раз, смени его при первом входе)
+  (секретный путь в URL тоже показывается только сейчас — сохрани его
+   куда-нибудь понадёжнее, без него панель просто не найти: голый
+   ${PUBLIC_URL}/ отдаёт 404 нарочно, для защиты от сканеров)
 
   VLESS-порт реверс-канала: ${VLESS_PORT} (открой в firewall провайдера, если не ufw)
 
