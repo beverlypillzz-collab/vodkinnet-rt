@@ -197,8 +197,19 @@ fi
 
 # --- Hub script ---
 fetch_file "vps/netcraze-remote-hub.py" "${INSTALL_DIR}/netcraze-remote-hub.py"
+
+# VodkinNET: xterm.js/css/addon-fit — раньше грузились с cdn.jsdelivr.net,
+# но на практике встроенная защита браузера от трекеров (Tracking
+# Prevention в Edge и аналоги) блокировала доступ к storage для стороннего
+# CDN-домена, из-за чего SSH-терминал в браузере молча не работал (пустое
+# окно без единой ошибки). Раздаём с того же origin, что и сама панель.
+mkdir -p "${INSTALL_DIR}/static"
+fetch_file "vps/static/xterm.min.js" "${INSTALL_DIR}/static/xterm.min.js"
+fetch_file "vps/static/xterm.min.css" "${INSTALL_DIR}/static/xterm.min.css"
+fetch_file "vps/static/addon-fit.min.js" "${INSTALL_DIR}/static/addon-fit.min.js"
 chmod +x "${INSTALL_DIR}/netcraze-remote-hub.py"
 chown "$SVC_USER:$SVC_USER" "${INSTALL_DIR}/netcraze-remote-hub.py"
+chown -R "$SVC_USER:$SVC_USER" "${INSTALL_DIR}/static"
 
 # --- сертификат ---
 if [ ! -f "/etc/letsencrypt/live/${HUB_DOMAIN}/fullchain.pem" ]; then

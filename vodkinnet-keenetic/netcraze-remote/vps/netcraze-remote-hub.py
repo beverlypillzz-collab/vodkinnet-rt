@@ -36,6 +36,11 @@ APP_NAME = "VodkinNet RT Hub"
 RAW_REPO_BASE = "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote"
 STATE_DIR = Path(os.environ.get("NETCRAZE_REMOTE_STATE_DIR", "/var/lib/netcraze-remote"))
 DB_PATH = Path(os.environ.get("NETCRAZE_REMOTE_DB", str(STATE_DIR / "hub.db")))
+# VodkinNET: статика (xterm.js/css) лежит рядом с самим скриптом — тем же
+# путём, что и install-vps.sh кладёт netcraze-remote-hub.py, только в
+# подпапке static/. Переопределяемо через env на случай нестандартной
+# раскладки.
+STATIC_DIR = Path(os.environ.get("NETCRAZE_REMOTE_STATIC_DIR", str(Path(__file__).resolve().parent / "static")))
 AUTH_FILE = STATE_DIR / "hub-auth.json"
 SESSION_TOKEN_FILE = STATE_DIR / "hub-session.token"
 SESSIONS_FILE = STATE_DIR / "hub-sessions.json"
@@ -3198,9 +3203,9 @@ def ssh_terminal_html_v2(row, ws_token, quick_commands_html=""):
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <title>SSH __SAFE_NAME__</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
-<script defer src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
-<script defer src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<link rel="stylesheet" href="/static/xterm.min.css">
+<script defer src="/static/xterm.min.js"></script>
+<script defer src="/static/addon-fit.min.js"></script>
 <style>
 :root{color-scheme:dark;--bg:#0a0603;--panel:rgba(19,14,32,.92);--text:#f7f2ff;--muted:#b9adc9;--line:rgba(169,126,255,.30);--green:#22c55e;--blue:#ff6a00;--cyan:#ff9a3c;--grid:rgba(255,106,0,.13)}
 *{box-sizing:border-box}html,body{min-height:100%;margin:0;overflow-x:hidden}
@@ -3286,7 +3291,7 @@ async function pollHttpTerminal(){if(!httpSid)return;try{const res=await fetch('
 async function startHttpTerminal(reason){if(terminalMode==='http'||httpSid)return;terminalMode='http';try{if(ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))ws.close();}catch(e){}if(reason==='direct')notice('Подключаю HTTP-terminal...','36');else notice(reason==='mobile'?'HTTP-terminal подключается...':reason+'. Включаю запасной HTTP-terminal...','36');try{const res=await fetch(appendQuery(SESSION_PATH,{cols:term.cols||80,rows:term.rows||24}),{cache:'no-store'});const data=await res.json();if(!res.ok||!data.ok){notice('HTTP-terminal не стартовал: '+(data.error||res.status),'31');return;}httpSid=data.sid;notice(READY_LABEL || (isMobileTerminal?'HTTP-terminal подключен. Вводи через поле снизу или клавиатуру.':'HTTP-terminal подключен. Кликни в терминал, Ctrl+V вставляет.'),'32');sendResize();pollHttpTerminal();}catch(e){notice('HTTP-terminal не стартовал: '+e,'31');}}
 async function explainTerminalError(source){if(diagnosticStarted)return;diagnosticStarted=true;try{const res=await fetch(CHECK_PATH,{cache:'no-store'});const data=await res.json();if(data.tcp_ok)await startHttpTerminal(source);else{notice('SSH-туннель на VPS не отвечает: '+(data.error||'порт закрыт'),'31');notice('В Hub нажми: Обновить Xray CFG, потом Рестарт Xray VPS, и проверь heartbeat роутера.','33');}}catch(e){notice('Не смог проверить SSH-туннель. Проверь firewall VPS и доступ к Hub.','31');}}
 function connect(){wsOpened=false;receivedTerminalData=false;diagnosticStarted=false;terminalMode='ws';httpSid='';inputQueue='';if(inputFlushTimer){clearTimeout(inputFlushTimer);inputFlushTimer=0;}if(term){term.reset();notice('Подключение к '+CONNECT_LABEL+'...','36');}if(FORCE_HTTP_ONLY){startHttpTerminal('direct');return;}const proto=location.protocol==='https:'?'wss://':'ws://';ws=new WebSocket(proto+location.host+WS_PATH);ws.binaryType='arraybuffer';ws.onopen=()=>{wsOpened=true;sendResize();};ws.onmessage=async(ev)=>{if(terminalMode==='http')return;let text='';if(typeof ev.data==='string')text=ev.data;else if(ev.data instanceof Blob)text=await ev.data.text();else text=decoder.decode(ev.data);if(!receivedTerminalData)term.clear();receivedTerminalData=true;term.write(text);};ws.onerror=()=>explainTerminalError('ошибка web-terminal');ws.onclose=()=>{if(terminalMode==='http')return;if(wsOpened)notice(CLOSED_LABEL,'33');else explainTerminalError(CLOSED_LABEL);};setTimeout(()=>{if(!receivedTerminalData&&!httpSid)startHttpTerminal(SILENT_LABEL);},3000);}
-function initTerminal(){if(!window.Terminal){terminalEl.classList.remove('loading');terminalEl.textContent='xterm.js не загрузился. Проверь доступ браузера к cdn.jsdelivr.net.';return;}terminalEl.classList.remove('loading');terminalEl.textContent='';term=new Terminal({cursorBlink:!isMobileTerminal,convertEol:false,scrollback:isMobileTerminal?200:5000,scrollSensitivity:isMobileTerminal?8:1,fastScrollSensitivity:isMobileTerminal?14:5,smoothScrollDuration:0,fontFamily:'"Cascadia Mono","Consolas","Liberation Mono",monospace',fontSize:isMobileTerminal?12:14,lineHeight:1.14,theme:{background:'#0b0714',foreground:'#f7f2ff',cursor:'#fbbf24',selectionBackground:'#334155',black:'#0b0714',red:'#fb7185',green:'#86efac',yellow:'#fde68a',blue:'#93c5fd',magenta:'#c084fc',cyan:'#67e8f9',white:'#f7f2ff'}});if(window.FitAddon&&FitAddon.FitAddon){fitAddon=new FitAddon.FitAddon();term.loadAddon(fitAddon);}term.open(terminalEl);term.onData(sendData);term.onResize(sendResize);term.attachCustomKeyEventHandler((ev)=>{const key=String(ev.key||'').toLowerCase();if((ev.ctrlKey||ev.metaKey)&&key==='c'&&term.hasSelection&&term.hasSelection()){copySelection();return false;}return true;});terminalEl.addEventListener('click',()=>term.focus());fitTerminal(true);connect();setTimeout(()=>{fitTerminal(true);term.focus();},120);}
+function initTerminal(){if(!window.Terminal){terminalEl.classList.remove('loading');terminalEl.textContent='xterm.js не загрузился. Проверь, что /static/xterm.min.js доступен.';return;}terminalEl.classList.remove('loading');terminalEl.textContent='';term=new Terminal({cursorBlink:!isMobileTerminal,convertEol:false,scrollback:isMobileTerminal?200:5000,scrollSensitivity:isMobileTerminal?8:1,fastScrollSensitivity:isMobileTerminal?14:5,smoothScrollDuration:0,fontFamily:'"Cascadia Mono","Consolas","Liberation Mono",monospace',fontSize:isMobileTerminal?12:14,lineHeight:1.14,theme:{background:'#0b0714',foreground:'#f7f2ff',cursor:'#fbbf24',selectionBackground:'#334155',black:'#0b0714',red:'#fb7185',green:'#86efac',yellow:'#fde68a',blue:'#93c5fd',magenta:'#c084fc',cyan:'#67e8f9',white:'#f7f2ff'}});if(window.FitAddon&&FitAddon.FitAddon){fitAddon=new FitAddon.FitAddon();term.loadAddon(fitAddon);}term.open(terminalEl);term.onData(sendData);term.onResize(sendResize);term.attachCustomKeyEventHandler((ev)=>{const key=String(ev.key||'').toLowerCase();if((ev.ctrlKey||ev.metaKey)&&key==='c'&&term.hasSelection&&term.hasSelection()){copySelection();return false;}return true;});terminalEl.addEventListener('click',()=>term.focus());fitTerminal(true);connect();setTimeout(()=>{fitTerminal(true);term.focus();},120);}
 document.addEventListener('paste',(ev)=>{if(isEditableTarget(ev.target))return;if(!terminalFocused())return;handlePaste(ev);});
 window.addEventListener('beforeunload',()=>{if(httpSid)navigator.sendBeacon('/api/ssh-session/'+encodeURIComponent(httpSid)+'/close');});
 let resizeTimer=0;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>fitTerminal(false),160);});
@@ -4070,7 +4075,34 @@ class Handler(BaseHTTPRequestHandler):
                 [("Service-Worker-Allowed", "/")],
             )
             return
-        if path == "/manifest.webmanifest":
+        if path.startswith("/static/"):
+            # VodkinNET: xterm.js/xterm.css/addon-fit.js раздаём с самого
+            # Hub'а, а не с внешнего CDN (cdn.jsdelivr.net) — на практике
+            # встроенная защита браузера от трекеров (Tracking Prevention
+            # в Edge и аналоги в других браузерах) блокировала доступ к
+            # storage для стороннего CDN-домена, из-за чего терминал
+            # молча не инициализировался (без единой ошибки в самом окне).
+            # Раздача с того же origin, что и сама панель, полностью
+            # снимает эту проблему — и заодно убирает зависимость от
+            # доступности стороннего CDN вообще.
+            filename = path[len("/static/"):]
+            allowed = {
+                "xterm.min.js": ("application/javascript; charset=utf-8", STATIC_DIR / "xterm.min.js"),
+                "xterm.min.css": ("text/css; charset=utf-8", STATIC_DIR / "xterm.min.css"),
+                "addon-fit.min.js": ("application/javascript; charset=utf-8", STATIC_DIR / "addon-fit.min.js"),
+            }
+            entry = allowed.get(filename)
+            if not entry:
+                self.send_text(404, "not found")
+                return
+            content_type, file_path = entry
+            try:
+                data = file_path.read_bytes()
+            except OSError:
+                self.send_text(404, "static file missing on disk")
+                return
+            self.send_bytes(200, data, content_type, [("Cache-Control", "public, max-age=604800, immutable")])
+            return
             self.send_bytes(200, web_manifest_json().encode("utf-8"), "application/manifest+json; charset=utf-8")
             return
         if path.startswith("/.well-known/acme-challenge/"):
