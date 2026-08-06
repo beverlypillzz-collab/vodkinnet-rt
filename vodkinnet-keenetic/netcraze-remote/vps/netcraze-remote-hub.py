@@ -2362,7 +2362,7 @@ cards.addEventListener('drop', async (ev) => {{
   dragSrcId = null;
 }});
 
-
+function nextEntryPort(list) {{
   const used = new Set();
   list.forEach(r => {{
     const entry = Number(r.entry_port || 0);
