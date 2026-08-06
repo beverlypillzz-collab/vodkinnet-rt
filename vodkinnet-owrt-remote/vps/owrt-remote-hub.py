@@ -2103,79 +2103,6 @@ function formatLoad(value) {{
   return value || 'Неизвестно';
 }}
 
-function render(list) {{
-  if (!list.length) {{
-    cards.innerHTML = '<div class="empty">Пока нет роутеров. Добавь первый, например <b>main</b>.</div>';
-    return;
-  }}
-  cards.innerHTML = list.map(r => {{
-    const role = String(r.role || 'node');
-    const isMain = role === 'main';
-    const online = Boolean(r.online);
-    const stateClass = online ? 'on' : 'off';
-    const stateText = online ? 'Онлайн' : 'Оффлайн';
-    const model = (r.status && (r.status.model || r.status.board)) || 'OpenWrt';
-    const release = (r.status && r.status.release) || 'waiting heartbeat';
-    const xray = (r.status && r.status.xray) || 'unknown';
-    const ssh = (r.status && r.status.ssh) || 'unknown';
-    const uptime = r.status && r.status.uptime ? duration(r.status.uptime) : 'unknown';
-    const load = formatLoad((r.status && r.status.load) || 'unknown');
-    const memory = formatMemory((r.status && r.status.memory) || 'unknown');
-    const flash = (r.status && r.status.flash) || 'unknown';
-    const temperature = (r.status && r.status.temperature) || 'unknown';
-    const access = r.public_url || r.access_url;
-    const tags = [
-      isMain ? 'главный' : 'node',
-      r.entry_port ? 'entry ' + r.entry_port : '',
-      r.ssh_entry_port ? 'ssh ' + r.ssh_entry_port : '',
-      r.reverse_tag || '',
-      (r.admin_host ? (r.admin_host + ':' + (r.admin_port || 80)) : 'admin: авто (LAN IP)')
-    ].filter(Boolean).slice(0, 5);
-    const tagHtml = tags.map(t => `<span class="tag">${{escapeHtml(t)}}</span>`).join('');
-    const adminButton = online
-      ? `<a class="btn" href="${{escapeAttr(access)}}">Админка</a>`
-      : `<span class="btn disabled">Админка</span>`;
-    const sshReady = online && ssh === 'running' && Number(r.ssh_entry_port || 0) > 0;
-    const sshButton = sshReady
-      ? `<a class="btn" href="${{escapeAttr(r.ssh_url || ('/ssh/' + encodeURIComponent(r.id) + '/'))}}" target="_blank" rel="noopener noreferrer">SSH</a>`
-      : `<span class="btn disabled">SSH</span>`;
-    const metricHtml = [
-      metric('Модель', model, 'span2'),
-      metric('Система', release),
-      metric('Xray', statusRu(xray)),
-      metric('SSH', statusRu(ssh)),
-      metric('В сети уже', uptime),
-      metric('Был на связи', ago(r.last_seen_iso)),
-      metric('RAM', memory),
-      metric('Flash', flash, flashClass(flash)),
-      metric('Температура', temperature, tempClass(temperature)),
-      metric('Нагрузка', load, 'span2')
-    ].join('');
-    return `<article class="card ${{isMain ? 'main' : ''}} ${{online ? 'online' : 'off'}}">
-      <div class="cardTop">
-        <div class="routerMark"><div class="routerIcon"><span></span></div></div>
-        <div class="status ${{stateClass}}"><i></i>${{stateText}}</div>
-      </div>
-      <div class="name">${{escapeHtml(r.name)}}</div>
-      <button class="mobileToggle" type="button" data-card-toggle="${{escapeAttr(detailsId)}}" aria-expanded="${{collapseCards ? 'false' : 'true'}}">${{collapseCards ? 'Открыть' : 'Скрыть'}}</button>
-      <div class="metaLine">ID: ${{escapeHtml(r.id)}} · роль: ${{escapeHtml(role)}}</div>
-      <div class="cardBody" id="${{escapeAttr(detailsId)}}"${{collapseCards ? ' hidden' : ''}}>
-      <div class="tagRow">${{tagHtml}}</div>
-      <div class="metrics">
-        ${{metricHtml}}
-      </div>
-      <div class="actions">
-        ${{adminButton}}
-        ${{sshButton}}
-        <a class="btn" href="${{escapeAttr(r.config_url)}}">OpenWrt config</a>
-        <a class="btn" href="${{escapeAttr(r.xray_client_url)}}">Client JSON</a>
-        <button class="btn" data-delete="${{escapeAttr(r.id)}}">Удалить</button>
-      </div>
-      </div>
-    </article>`;
-  }}).join('');
-}}
-
 function escapeHtml(s) {{
   return String(s ?? '').replace(/[&<>"']/g, ch => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[ch]));
 }}
@@ -2184,7 +2111,7 @@ function escapeAttr(s) {{
   return escapeHtml(s);
 }}
 
-render = function(list) {{
+function render(list) {{
   if (!list.length) {{
     cards.innerHTML = '<div class="empty">Пока нет роутеров. Добавь первый, например <b>main</b>.</div>';
     return;
