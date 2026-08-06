@@ -359,18 +359,6 @@ _pin_fastly_pool() {
 	return 0
 }
 
-fetch_file() {
-	local url dst
-	url="$1"
-	dst="$2"
-	if command -v wget >/dev/null 2>&1; then
-		wget -O "$dst" "$url"
-	elif command -v curl >/dev/null 2>&1; then
-		curl -fsSL "$url" -o "$dst"
-	else
-		die "для удаленной установки нужен wget или curl"
-	fi
-}
 # NOTE: fetch_file() above is intentionally overridden further down in this
 # file ("Override Xray bootstrap with boot-safe retry logic") - shell keeps
 # only the last function definition, so that later one is what actually runs.
@@ -436,76 +424,6 @@ xray_release_asset() {
 		mips*) printf '%s\n' "Xray-linux-mips32.zip" ;;
 		*) return 1 ;;
 	esac
-}
-
-install_package() {
-	local pkg
-	pkg="$1"
-	if command -v opkg >/dev/null 2>&1; then
-		opkg update || die "не смог обновить opkg для установки $pkg"
-		opkg install "$pkg" || die "не смог поставить $pkg через opkg"
-		return
-	fi
-	if command -v apk >/dev/null 2>&1; then
-		apk -U add "$pkg" ca-certificates || die "не смог поставить $pkg через apk"
-		return
-	fi
-	die "не найден пакетный менеджер opkg или apk для установки $pkg"
-}
-
-install_xray_tmp() {
-	local dir zip asset url version
-	dir="/tmp/owrt-xray"
-	zip="$dir/xray.zip"
-	asset="$(xray_release_asset)" || die "не знаю готовый Xray asset для $(uname -m 2>/dev/null)"
-	url="https://github.com/XTLS/Xray-core/releases/latest/download/$asset"
-
-	mkdir -p /var/lock /var/run "$dir"
-	if ! command -v unzip >/dev/null 2>&1; then
-		install_package unzip
-	fi
-
-	printf 'Скачиваю Xray: %s\n' "$asset"
-	fetch_file "$url" "$zip"
-	( cd "$dir" && unzip -o "$zip" xray >/dev/null ) || die "не смог распаковать Xray"
-	chmod +x "$dir/xray"
-	version="$("$dir/xray" version 2>&1)" || die "скачанный Xray не запускается"
-	version="$(printf '%s\n' "$version" | sed -n '1p')"
-
-	uci set "$CONFIG.$SECTION.xray_bin=$dir/xray"
-	uci commit "$CONFIG"
-	printf 'OK: Xray поставлен в %s\n' "$dir/xray"
-	printf 'OK: %s\n' "$version"
-	printf 'OK: xray_bin сохранен в /etc/config/owrtremote\n'
-}
-
-ensure_xray_available() {
-	local configured candidate found
-	configured="$(uci_get xray_bin /usr/bin/xray)"
-	[ -x "$configured" ] && return 0
-
-	for candidate in /usr/bin/xray /usr/bin/xray-core /usr/local/bin/xray /opt/bin/xray /tmp/owrt-xray/xray /tmp/xray; do
-		if [ -x "$candidate" ]; then
-			found="$candidate"
-			break
-		fi
-	done
-
-	if [ -z "$found" ]; then
-		found="$(command -v xray 2>/dev/null || command -v xray-core 2>/dev/null || true)"
-	fi
-
-	if [ -n "$found" ] && [ -x "$found" ]; then
-		[ "$found" = "$configured" ] || {
-			uci set "$CONFIG.$SECTION.xray_bin=$found"
-			uci commit "$CONFIG"
-			log "Xray найден: $found"
-		}
-		return 0
-	fi
-
-	log "Xray не найден ($configured), ставлю временный Xray в /tmp..."
-	install_xray_tmp
 }
 
 service_enabled() {
@@ -644,22 +562,6 @@ EOF
 	chmod 0600 "$xray_config"
 	rm -f "$out"
 	printf '%s\n' "$xray_config"
-}
-
-run_xray() {
-	local enabled xray_bin xray_config
-	enabled="$(uci_get enabled 0)"
-	truthy "$enabled" || die "сервис выключен: включи option enabled '1'"
-
-	ensure_xray_available
-	xray_bin="$(xray_bin_path)"
-	xray_config="$(render_client_config)"
-	[ -x "$xray_bin" ] || die "xray не найден или не исполняемый: $xray_bin"
-
-	if "$xray_bin" help 2>/dev/null | grep -q 'run'; then
-		exec "$xray_bin" run -config "$xray_config"
-	fi
-	exec "$xray_bin" -config "$xray_config"
 }
 
 heartbeat_json() {
