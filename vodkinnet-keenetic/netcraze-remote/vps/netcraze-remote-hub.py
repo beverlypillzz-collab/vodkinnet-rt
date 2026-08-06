@@ -1110,6 +1110,11 @@ def init_db(conn):
     # роутеров и для тех, кому явно нажали "перевыпустить" — миграция
     # добровольная, по мере того как до устройства дойдут руки.
     ensure_column(conn, "routers", "agent_token", "text not null default ''")
+    # VodkinNET: позиция карточки роутера в панели (drag-and-drop с
+    # фиксацией). 0 у всех по умолчанию — тогда list_router_rows()
+    # падает на прежнюю логику сортировки (main первым, дальше по
+    # алфавиту) как разумный фолбэк, пока никто ничего не перетаскивал.
+    ensure_column(conn, "routers", "sort_order", "integer not null default 0")
     conn.execute(
         """
         update routers
@@ -1132,6 +1137,17 @@ def ensure_column(conn, table, column, definition):
     cols = {row["name"] for row in conn.execute(f"pragma table_info({table})")}
     if column not in cols:
         conn.execute(f"alter table {table} add column {column} {definition}")
+
+
+def reorder_routers(conn, ordered_ids):
+    # VodkinNET: drag-and-drop порядок карточек в панели. Обновляем
+    # sort_order только для реально существующих ID (тихо игнорируем
+    # прочее — не должно происходить в норме, но не хотим падать 500-й
+    # ошибкой на рассинхронизированный список с фронтенда).
+    for index, router_id in enumerate(ordered_ids):
+        clean_id = clean_router_id(router_id)
+        conn.execute("update routers set sort_order = ? where id = ?", (index, clean_id))
+    conn.commit()
 
 
 def get_router(conn, router_id):
@@ -1177,7 +1193,7 @@ def list_router_rows(conn):
     return conn.execute(
         """
         select * from routers
-        order by case role when 'main' then 0 else 1 end, lower(id)
+        order by sort_order, case role when 'main' then 0 else 1 end, lower(id)
         """
     ).fetchall()
 
@@ -1206,6 +1222,14 @@ def upsert_router(conn, values):
     router_id = clean_router_id(values.get("id"))
     current = get_router(conn, router_id)
     ts = now_ts()
+
+    if current:
+        sort_order_value = current["sort_order"]
+    else:
+        # VodkinNET: новый роутер сразу встаёт в конец списка, а не
+        # мешается в середину уже вручную расставленных карточек.
+        max_row = conn.execute("select coalesce(max(sort_order), 0) as m from routers").fetchone()
+        sort_order_value = int(max_row["m"]) + 1
 
     def keep_str(key, default=""):
         value = values.get(key)
@@ -1268,6 +1292,7 @@ def upsert_router(conn, values):
         "ssh_host": strip_cidr(keep_str("ssh_host", "")),
         "ssh_port": keep_int("ssh_port", 22),
         "agent_token": agent_token_value,
+        "sort_order": sort_order_value,
         "updated_at": ts,
     }
     if current:
@@ -1293,6 +1318,7 @@ def upsert_router(conn, values):
                 ssh_host = :ssh_host,
                 ssh_port = :ssh_port,
                 agent_token = :agent_token,
+                sort_order = :sort_order,
                 updated_at = :updated_at
             where id = :id
             """,
@@ -1306,13 +1332,13 @@ def upsert_router(conn, values):
                 id, name, role, entry_port, vps_host, vless_port, vless_uuid,
                 vless_encryption, vless_decryption, vless_flow, reverse_tag,
                 public_url, admin_host, admin_port, ssh_entry_port, ssh_vless_uuid,
-                ssh_reverse_tag, ssh_host, ssh_port, agent_token,
+                ssh_reverse_tag, ssh_host, ssh_port, agent_token, sort_order,
                 created_at, updated_at
             ) values (
                 :id, :name, :role, :entry_port, :vps_host, :vless_port, :vless_uuid,
                 :vless_encryption, :vless_decryption, :vless_flow, :reverse_tag,
                 :public_url, :admin_host, :admin_port, :ssh_entry_port, :ssh_vless_uuid,
-                :ssh_reverse_tag, :ssh_host, :ssh_port, :agent_token,
+                :ssh_reverse_tag, :ssh_host, :ssh_port, :agent_token, :sort_order,
                 :created_at, :updated_at
             )
             """,
@@ -1946,14 +1972,14 @@ h1{{margin:0;font-size:29px;line-height:1.2;letter-spacing:0}}.appBanner{{positi
 .notifyBox{{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}}.notifyActions{{display:flex;gap:7px;align-items:center;justify-content:flex-end;flex-wrap:wrap}}.notifyHint{{margin:-4px 0 10px;color:var(--muted);font-size:12px;line-height:1.35}}.notifyList{{display:grid;gap:8px;max-height:260px;overflow:auto;padding-right:2px}}.notifyRow{{border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.055);padding:9px;text-align:left}}.notifyTitle{{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:950}}.notifyTitle span:first-child{{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}.notifyTime{{color:var(--muted);font-size:11px;font-weight:750;white-space:nowrap}}.notifyBody{{margin-top:4px;color:#f3d9c0;font-size:12px;line-height:1.35;word-break:break-word}}.notifyDetails{{margin:7px 0 0;padding:8px;border:1px solid rgba(255,255,255,.08);border-radius:7px;background:rgba(0,0,0,.18);color:#f0c9a0;font:11px/1.35 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;max-height:92px;overflow:auto}}.notifyRow.warn{{border-color:rgba(245,158,11,.34);background:rgba(245,158,11,.08)}}.notifyRow.bad{{border-color:rgba(251,113,133,.38);background:rgba(251,113,133,.09)}}.notifyBtn.on{{border-color:rgba(34,197,94,.36);background:rgba(34,197,94,.15);color:#bbf7d0}}
 input,select{{min-width:0;border:1px solid var(--line);border-radius:8px;padding:10px 11px;background:rgba(8,5,18,.72);color:var(--text)}}button,.btn{{border:1px solid rgba(255,255,255,.10);border-radius:8px;padding:10px 13px;background:rgba(255,255,255,.10);color:#f7f2ff;font-weight:850;text-decoration:none;cursor:pointer;display:inline-flex;justify-content:center;align-items:center}}.authToggle{{border-radius:999px;padding:8px 14px;background:rgba(255,255,255,.08);color:#fff2e8}}button.primary,.btn.primary{{background:var(--blue);color:#fff;box-shadow:0 10px 22px rgba(224,80,0,.22)}}button.bad,.btn.bad{{background:rgba(251,113,133,.16);color:#fecdd3}}.btn.good{{background:rgba(34,197,94,.16);color:#bbf7d0}}.btn.disabled{{opacity:.45;cursor:not-allowed}}
 .summary{{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}}.miniStat{{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;min-width:132px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.07);padding:8px 12px;color:#f3d9c0;font-weight:800;font-size:13px;line-height:1;white-space:nowrap}}
-.cards{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}}.card{{position:relative;min-height:246px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.045)),var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 18px 46px rgba(0,0,0,.28);backdrop-filter:blur(10px)}}.card::before{{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--green)}}.card.online{{border-color:rgba(34,197,94,.45);box-shadow:0 18px 46px rgba(0,0,0,.28),0 0 0 1px rgba(34,197,94,.10),0 0 34px rgba(34,197,94,.10)}}.card.off{{border-color:rgba(251,113,133,.42);box-shadow:0 18px 46px rgba(0,0,0,.28),0 0 0 1px rgba(251,113,133,.08),0 0 30px rgba(251,113,133,.08)}}.card.off::before{{background:var(--red)}}.card.warn::before{{background:var(--amber)}}.card.main{{grid-column:span 2}}
+.cards{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}}.card{{position:relative;min-height:246px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.045)),var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 18px 46px rgba(0,0,0,.28);backdrop-filter:blur(10px)}}.card::before{{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--green)}}.card.online{{border-color:rgba(34,197,94,.45);box-shadow:0 18px 46px rgba(0,0,0,.28),0 0 0 1px rgba(34,197,94,.10),0 0 34px rgba(34,197,94,.10)}}.card.off{{border-color:rgba(251,113,133,.42);box-shadow:0 18px 46px rgba(0,0,0,.28),0 0 0 1px rgba(251,113,133,.08),0 0 30px rgba(251,113,133,.08)}}.card.off::before{{background:var(--red)}}.card.warn::before{{background:var(--amber)}}.card.main{{grid-column:span 2}}.card{{cursor:grab}}.card.dragging{{opacity:.4;cursor:grabbing}}.card.dragOver{{outline:2px dashed var(--green);outline-offset:2px}}
 @keyframes onlineGlow{{0%,100%{{transform:scale(.9);opacity:.55}}50%{{transform:scale(1.08);opacity:1}}}}@keyframes offlineGlow{{0%,100%{{transform:scale(.88);opacity:.34}}50%{{transform:scale(1.08);opacity:.9}}}}
 @keyframes bannerShine{{0%,45%{{transform:translateX(-120%)}}72%,100%{{transform:translateX(120%)}}}}
 .cardTop{{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}}.routerMark{{position:relative;display:grid;place-items:center;width:52px;height:52px;border-radius:8px;background:rgba(255,255,255,.08);overflow:hidden;box-shadow:0 0 24px rgba(255,154,60,.12)}}.routerMark::before{{content:"";position:absolute;inset:-45%;background:conic-gradient(from 0deg,transparent,rgba(255,154,60,.72),rgba(255,106,0,.62),rgba(251,191,36,.52),transparent);animation:routerHalo 5.8s linear infinite}}.routerMark::after{{content:"";position:absolute;inset:2px;border-radius:7px;background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(255,255,255,.05)),rgba(19,14,32,.95);border:1px solid rgba(255,255,255,.16)}}.routerIcon{{position:relative;z-index:1;width:30px;height:20px;border:2px solid #38bdf8;border-radius:6px;box-shadow:0 0 18px rgba(56,189,248,.28)}}.routerIcon::before,.routerIcon::after{{content:"";position:absolute;top:-10px;width:10px;height:10px;border-top:2px solid #a5f3fc}}.routerIcon::before{{left:1px;transform:rotate(-34deg)}}.routerIcon::after{{right:1px;transform:rotate(34deg)}}.routerIcon span{{position:absolute;left:5px;right:5px;bottom:4px;display:flex;justify-content:space-between}}.routerIcon span::before,.routerIcon span::after{{content:"";width:4px;height:4px;border-radius:50%;background:#22c55e;box-shadow:0 0 10px #22c55e;animation:statusPulse 1.8s ease-in-out infinite}}.card.off .routerIcon span::before,.card.off .routerIcon span::after{{background:#fb7185;box-shadow:0 0 10px #fb7185}}@keyframes routerHalo{{from{{transform:rotate(0deg)}}to{{transform:rotate(360deg)}}}}
 .status{{display:inline-flex;align-items:center;gap:7px;border-radius:999px;border:1px solid rgba(34,197,94,.36);background:rgba(34,197,94,.14);padding:7px 10px;font-weight:900;font-size:12px;color:#bbf7d0}}.status i{{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 13px var(--green);animation:statusPulse 1.6s ease-in-out infinite}}.status.off{{border-color:rgba(251,113,133,.36);background:rgba(251,113,133,.12);color:#fecdd3}}.status.off i{{background:var(--red);box-shadow:0 0 13px var(--red);animation:offlinePulse 1.9s ease-in-out infinite}}.status.warn i{{background:var(--amber);box-shadow:0 0 13px var(--amber)}}@keyframes statusPulse{{0%,100%{{transform:scale(1);opacity:.75}}50%{{transform:scale(1.45);opacity:1}}}}@keyframes offlinePulse{{0%,100%{{transform:scale(1);opacity:.5}}50%{{transform:scale(1.42);opacity:1}}}}.name{{margin:12px 0 0;font-size:19px;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}.routerFormToggle{{display:none;width:100%;margin:14px 0 10px;border-radius:999px}}.routerFormWrap{{display:block}}.metaLine{{margin-top:3px;color:var(--muted)}}.tagRow{{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}}.tag{{border:1px solid var(--line);border-radius:999px;padding:5px 9px;background:rgba(255,255,255,.06);color:#f3d9c0;font-size:12px;font-weight:750}}
 .metrics{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:14px}}.metric{{border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.055);padding:9px}}.metric.span2{{grid-column:span 2}}.metric.temp-ok strong,.metric.flash-ok strong{{color:#bbf7d0}}.metric.temp-warn strong,.metric.flash-warn strong{{color:#fde68a}}.metric.temp-bad strong,.metric.flash-bad strong{{color:#fecdd3}}.metric span{{display:block;color:var(--muted);font-size:11px}}.metric strong{{display:block;margin-top:2px;font-size:14px;word-break:break-word}}.actions{{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}}.empty{{grid-column:1/-1;border:1px dashed var(--line);border-radius:8px;padding:30px;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.045)),var(--panel);text-align:center;color:var(--muted)}}.hint{{margin-top:16px;padding:13px;border:1px solid var(--line);border-radius:8px;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.045)),var(--panel);color:var(--muted)}}code{{background:rgba(255,255,255,.10);border-radius:6px;padding:2px 5px;color:#fff2e8}}
 .brandPanel{{display:grid;grid-template-columns:repeat(2,minmax(0,132px));gap:8px}}.brandPanel .appBanner{{grid-column:1/-1;width:100%;min-width:0}}.brandPanel .links{{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:0}}.brandPanel .links a{{width:100%;min-width:0}}.card{{text-align:center}}.cardTop{{align-items:center;justify-content:center;flex-direction:column}}.routerMark{{margin:0 auto}}.tagRow,.actions{{justify-content:center}}.name{{display:inline-flex;align-items:center;justify-content:center;max-width:100%;min-height:34px;margin-top:10px;padding:7px 10px;border:1px solid rgba(251,191,36,.48);border-radius:999px;background:linear-gradient(135deg,rgba(251,191,36,.32),rgba(245,158,11,.22),rgba(255,255,255,.07));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff;font-size:13px;line-height:1;font-weight:900;text-shadow:0 0 16px rgba(251,191,36,.42);box-shadow:0 10px 24px rgba(245,158,11,.10),inset 0 1px 0 rgba(255,255,255,.12)}}.metric{{text-align:center}}.metric.span2{{grid-column:1/-1}}
-@media(max-width:980px){{.cards{{grid-template-columns:repeat(2,minmax(0,1fr))}}.toolbar,.authGrid{{grid-template-columns:1fr 1fr}}.card.main{{grid-column:span 2}}.top{{flex-direction:column}}.headerActions{{align-self:flex-start;flex-wrap:wrap;padding-top:0;justify-content:flex-start}}}}
+@media(max-width:980px){{.cards{{grid-template-columns:repeat(2,minmax(0,1fr))}}.toolbar,.authGrid{{grid-template-columns:1fr 1fr}}.card.main{{grid-column:span 2}}.card{{cursor:grab}}.card.dragging{{opacity:.4;cursor:grabbing}}.card.dragOver{{outline:2px dashed var(--green);outline-offset:2px}}.top{{flex-direction:column}}.headerActions{{align-self:flex-start;flex-wrap:wrap;padding-top:0;justify-content:flex-start}}}}
 @media(max-width:680px){{body{{font-size:13px;background-attachment:scroll}}.wrap{{padding:10px}}.top{{gap:12px;padding:14px 0;align-items:flex-start;flex-direction:column}}.brand,.brand>div{{width:100%}}h1{{font-size:22px;line-height:1.18}}.appBanner{{width:auto;max-width:100%;justify-content:center;min-height:36px;padding:8px 12px}}.links,.headerActions,.summary{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;gap:8px;max-width:none}}.links{{margin-top:10px}}.links a,.badge,.headerActions .btn,.miniStat{{width:100%;min-width:0;padding:9px 10px;font-size:12px}}.authMenu{{position:fixed;left:10px;right:10px;top:74px;width:auto;max-height:calc(100svh - 90px);overflow:auto}}.cards,.toolbar,.authGrid{{grid-template-columns:1fr}}.toolbar{{padding:10px;margin:12px 0}}.card.main{{grid-column:span 1}}.card{{padding:12px;min-height:0}}.name{{font-size:12px;max-width:92%}}.routerFormToggle{{display:inline-flex}}.routerFormWrap[hidden]{{display:none}}.metrics{{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}}.metric{{padding:8px}}.actions{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}}.actions .btn,.actions button{{width:100%;min-width:0;padding:9px 8px;font-size:12px}}}}
 @media(max-width:680px){{.headerActions .badge,.headerActions .btn{{width:100%;min-width:0;max-width:none}}}}
 @media(max-width:420px){{.links,.headerActions,.summary,.actions{{grid-template-columns:1fr}}.metrics{{grid-template-columns:1fr}}.metric.span2{{grid-column:span 1}}}}
@@ -2248,7 +2274,7 @@ render = function(list) {{
       metric('Температура', temperature, tempClass(temperature)),
       metric('Нагрузка', load, 'span2')
     ].join('');
-    return `<article class="card ${{isMain ? 'main' : ''}} ${{online ? 'online' : 'off'}}">
+    return `<article class="card ${{isMain ? 'main' : ''}} ${{online ? 'online' : 'off'}}" draggable="true" data-router-id="${{escapeAttr(r.id)}}">
       <div class="cardTop">
         <div class="routerMark"><div class="routerIcon"><span></span></div></div>
         <div class="status ${{stateClass}}"><i></i>${{stateText}}</div>
@@ -2269,7 +2295,74 @@ render = function(list) {{
   }}).join('');
 }};
 
-function nextEntryPort(list) {{
+// VodkinNET: drag-and-drop переупорядочивание карточек роутеров с
+// сохранением позиции на сервере (sort_order). Используем нативный
+// HTML5 drag-and-drop (без библиотек) + event delegation на контейнере
+// cards, так как карточки перерисовываются целиком при каждом опросе
+// (innerHTML), навешивать обработчики на каждую карточку по отдельности
+// смысла нет - они бы слетали при следующем обновлении списка.
+let dragSrcId = null;
+
+cards.addEventListener('dragstart', (ev) => {{
+  const card = ev.target.closest('article.card');
+  if (!card) return;
+  dragSrcId = card.dataset.routerId;
+  card.classList.add('dragging');
+  ev.dataTransfer.effectAllowed = 'move';
+  try {{ ev.dataTransfer.setData('text/plain', dragSrcId); }} catch (e) {{}}
+}});
+
+cards.addEventListener('dragend', (ev) => {{
+  const card = ev.target.closest('article.card');
+  if (card) card.classList.remove('dragging');
+  cards.querySelectorAll('article.card.dragOver').forEach(el => el.classList.remove('dragOver'));
+}});
+
+cards.addEventListener('dragover', (ev) => {{
+  const card = ev.target.closest('article.card');
+  if (!card || card.dataset.routerId === dragSrcId) return;
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'move';
+  cards.querySelectorAll('article.card.dragOver').forEach(el => el.classList.remove('dragOver'));
+  card.classList.add('dragOver');
+}});
+
+cards.addEventListener('dragleave', (ev) => {{
+  const card = ev.target.closest('article.card');
+  if (card) card.classList.remove('dragOver');
+}});
+
+cards.addEventListener('drop', async (ev) => {{
+  const targetCard = ev.target.closest('article.card');
+  cards.querySelectorAll('article.card.dragOver').forEach(el => el.classList.remove('dragOver'));
+  if (!targetCard || !dragSrcId || targetCard.dataset.routerId === dragSrcId) return;
+  ev.preventDefault();
+  const srcCard = cards.querySelector(`article.card[data-router-id="${{CSS.escape(dragSrcId)}}"]`);
+  if (!srcCard) return;
+  // вставляем srcCard перед или после targetCard - смотря откуда тащили,
+  // чтобы порядок визуально совпадал с интуитивным ожиданием
+  const allCards = Array.from(cards.querySelectorAll('article.card'));
+  const srcIndex = allCards.indexOf(srcCard);
+  const targetIndex = allCards.indexOf(targetCard);
+  if (srcIndex < targetIndex) {{
+    targetCard.after(srcCard);
+  }} else {{
+    targetCard.before(srcCard);
+  }}
+  const newOrder = Array.from(cards.querySelectorAll('article.card')).map(el => el.dataset.routerId);
+  try {{
+    await fetch('/api/router/reorder', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+      body: new URLSearchParams({{order: newOrder.join(',')}}),
+    }});
+  }} catch (e) {{
+    showRouterMsg('Не удалось сохранить порядок карточек', true);
+  }}
+  dragSrcId = null;
+}});
+
+
   const used = new Set();
   list.forEach(r => {{
     const entry = Number(r.entry_port || 0);
@@ -4495,6 +4588,17 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(200, {"ok": True, "router": router})
             except Exception as exc:
                 self.send_text(400, str(exc))
+            return
+        if path == "/api/router/reorder":
+            payload = self.read_payload()
+            order_raw = payload.get("order", "")
+            ordered_ids = [x for x in order_raw.split(",") if x]
+            if not ordered_ids:
+                self.send_text(400, "пустой список порядка")
+                return
+            with self.app.conn() as conn:
+                reorder_routers(conn, ordered_ids)
+            self.send_json(200, {"ok": True})
             return
         if path.startswith("/api/router/") and path.endswith("/delete"):
             router_id = urllib.parse.unquote(path.split("/")[3])
