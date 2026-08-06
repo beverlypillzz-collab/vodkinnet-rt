@@ -2421,14 +2421,15 @@ function fillRouterForm(force = false) {{
   const id = nextRouterId(list);
   if (force || !routerForm.id.value) routerForm.id.value = id;
   if (force || !routerForm.name.value) routerForm.name.value = defaultRouterName(routerForm.id.value || id);
-  // VodkinNET: admin-канал (веб-морда) больше не предлагается по умолчанию —
-  // для NDMS он подтверждённо не работает (Basic Auth не переживает
-  // проксирование через другой origin), кнопка "Админка" убрана из
-  // интерфейса. Раньше именно эта авто-подстановка (для entry_port) была
-  // причиной того, что admin-канал сам собой "включался обратно" при
-  // каждом повторном открытии формы для уже существующего роутера.
-  // Вместо этого предлагаем свободный SSH-порт — это основной канал.
-  if (force || !routerForm.ssh_entry_port.value) routerForm.ssh_entry_port.value = String(nextEntryPort(list) + 1000);
+  // VodkinNET: оба порта авто-подставляются для удобства (как в
+  // owrt-remote) - но помни: admin-канал (веб-морда) подтверждённо не
+  // работает для NDMS (Basic Auth не переживает проксирование через
+  // другой origin), кнопки "Админка" в интерфейсе нет. Если создаёшь
+  // роутер только под SSH - просто сотри значение из поля порта админки
+  // перед отправкой формы (оба порта независимо опциональны на бэкенде).
+  const suggestedPort = nextEntryPort(list);
+  if (force || !routerForm.entry_port.value) routerForm.entry_port.value = String(suggestedPort);
+  if (force || !routerForm.ssh_entry_port.value) routerForm.ssh_entry_port.value = String(suggestedPort + 1000);
   if (force || !routerForm.vps_host.value) routerForm.vps_host.value = defaultVpsHost(list);
   if (force || !routerForm.role.value) routerForm.role.value = id === 'main' ? 'main' : 'node';
 }}
