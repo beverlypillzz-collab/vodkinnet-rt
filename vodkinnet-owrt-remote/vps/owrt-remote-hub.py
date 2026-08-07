@@ -74,6 +74,22 @@ def reverse_stream_settings():
                 ],
             },
         }
+    # VodkinNET: найдено на практике — OWRT_REMOTE_TLS_CERT/KEY имеют
+    # ДВОЙНОЕ назначение (см. install-vps.sh setup_nginx_vhost) — и для
+    # встроенного TLS-листенера самой панели, И для TLS вот этого самого
+    # реверс-туннеля. Если их случайно обнулить (например, выключая
+    # только встроенный листенер панели при переходе на nginx-прокси),
+    # ВЕСЬ флот роутеров разом перестаёт подключаться — без единой строки
+    # в логе Xray, потому что TLS-рукопожатие проваливается раньше, чем
+    # Xray успевает залогировать что-либо на уровне VLESS. Явное
+    # предупреждение здесь — единственный шанс заметить это сразу в
+    # journalctl, а не потратить время на поиск причины вслепую.
+    print(
+        "WARNING: OWRT_REMOTE_TLS_CERT/KEY не заданы — реверс-туннель "
+        "поднимается БЕЗ TLS (security: none). Если роутеры ожидают TLS "
+        "(обычно так и есть), они не смогут подключиться вообще.",
+        file=sys.stderr,
+    )
     return {"network": "tcp", "security": "none"}
 REQUEST_QUEUE_SIZE = int(os.environ.get("OWRT_REMOTE_REQUEST_QUEUE_SIZE", "128"))
 ROUTER_PROXY_LIMIT = max(1, int(os.environ.get("OWRT_REMOTE_ROUTER_PROXY_LIMIT", "4")))
