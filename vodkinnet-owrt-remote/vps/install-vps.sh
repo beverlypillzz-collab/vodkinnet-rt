@@ -247,11 +247,23 @@ setup_nginx_vhost() {
 	chmod 0600 /etc/owrt-remote-secret-path.txt
 
 	mkdir -p /etc/systemd/system/owrt-remote.service.d
+	# VodkinNET: OWRT_REMOTE_TLS_CERT/KEY используются ДВАЖДЫ в коде
+	# owrt-remote-hub.py — и для встроенного TLS-листенера самой панели
+	# (который здесь МЫ ХОТИМ выключить, раз TLS теперь берёт на себя
+	# nginx), И ОТДЕЛЬНО для reverse_stream_settings() — TLS самого
+	# реверс-туннеля (порт ${OWRT_REMOTE_VLESS_PORT:-8443}, куда
+	# подключаются сами роутеры)! Обнулять эти переменные НЕЛЬЗЯ — это
+	# сломает туннель для ВСЕХ роутеров сразу (найдено на практике: после
+	# именно такой ошибки роутеры переставали подключаться вообще, без
+	# единой записи в логе, поскольку TLS-рукопожатие проваливалось раньше,
+	# чем Xray успевал что-либо залогировать на уровне VLESS-протокола).
+	# Выключаем встроенный листенер ТОЛЬКО через TLS_PORTS="" — сертификат
+	# и ключ сами по себе остаются заданными.
 	cat > /etc/systemd/system/owrt-remote.service.d/nginx-proxy.conf <<DROPIN
 [Service]
 Environment=OWRT_REMOTE_BIND=127.0.0.1
-Environment=OWRT_REMOTE_TLS_CERT=
-Environment=OWRT_REMOTE_TLS_KEY=
+Environment=OWRT_REMOTE_TLS_CERT=${cert}
+Environment=OWRT_REMOTE_TLS_KEY=${key}
 Environment=OWRT_REMOTE_TLS_PORTS=
 Environment=OWRT_REMOTE_PUBLIC_URL=https://${host}:${OWRT_REMOTE_EXTERNAL_HTTPS_PORT}
 DROPIN
