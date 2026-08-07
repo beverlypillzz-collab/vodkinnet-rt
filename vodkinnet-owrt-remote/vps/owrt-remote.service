@@ -27,10 +27,19 @@ RestartSec=3
 # (это системная capability, не требует полных прав пользователя).
 # Рестарт owrt-remote-xray — через узкое sudoers-правило (см.
 # owrt-remote.sudoers), не через полные права самого процесса.
+#
+# CapabilityBoundingSet — потолок возможностей для ВСЕГО дерева
+# процессов, включая дочерний sudo. Раньше был только
+# CAP_NET_BIND_SERVICE — этого хватало для самого приложения, но sudo
+# (setuid-root бинарь) для СОБСТВЕННОЙ внутренней работы (переключение
+# на root gid, инициализация audit-плагина) нужны CAP_SETUID/
+# CAP_SETGID/CAP_AUDIT_WRITE — без них он падает с "unable to change to
+# root gid: Operation not permitted", что и нашли на практике при клике
+# "Рестарт Xray VPS" в панели.
 User=openwrt-remote
 Group=openwrt-remote
 AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE
 DynamicUser=no
 
 [Install]
