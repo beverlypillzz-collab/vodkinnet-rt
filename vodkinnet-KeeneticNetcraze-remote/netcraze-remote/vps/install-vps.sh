@@ -7,11 +7,11 @@
 # sudoers-правило на один конкретный systemctl-вызов. Xray-бинарь
 # проверяется по SHA256SUMS релиза перед установкой.
 #
-#   curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/vps/install-vps.sh?v=$(date +%s)" | sudo sh
+#   curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-KeeneticNetcraze-remote/netcraze-remote/vps/install-vps.sh?v=$(date +%s)" | sudo sh
 
 set -eu
 
-REPO_RAW="https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote"
+REPO_RAW="https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-KeeneticNetcraze-remote/netcraze-remote"
 INSTALL_DIR="/opt/netcraze-remote"
 XRAY_BIN="/usr/local/bin/netcraze-remote-xray"
 XRAY_CONFIG_DIR="/etc/netcraze-remote"

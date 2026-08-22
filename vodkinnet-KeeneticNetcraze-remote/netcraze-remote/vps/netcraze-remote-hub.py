@@ -33,7 +33,7 @@ except Exception:
 
 
 APP_NAME = "VodkinNet RT Hub"
-RAW_REPO_BASE = "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote"
+RAW_REPO_BASE = "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-KeeneticNetcraze-remote/netcraze-remote"
 STATE_DIR = Path(os.environ.get("NETCRAZE_REMOTE_STATE_DIR", "/var/lib/netcraze-remote"))
 DB_PATH = Path(os.environ.get("NETCRAZE_REMOTE_DB", str(STATE_DIR / "hub.db")))
 # VodkinNET: статика (xterm.js/css) лежит рядом с самим скриптом — тем же

@@ -139,7 +139,7 @@ opkg — ничего не пытается работать, если Entware �
 ### 1. VPS — Hub
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/vps/install-vps.sh?v=$(date +%s)" | sudo sh
+curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-KeeneticNetcraze-remote/netcraze-remote/vps/install-vps.sh?v=$(date +%s)" | sudo sh
 ```
 
 Спросит домен, выпустит сертификат, создаст системного пользователя
@@ -157,7 +157,7 @@ curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/
 в базе знаний — раздел про Entware/OPKG на этой прошивке).
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/install.sh?v=$(date +%s)" | sh
+curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-KeeneticNetcraze-remote/netcraze-remote/install.sh?v=$(date +%s)" | sh
 ```
 
 Скрипт сам проверит, что Entware реально работает (не просто "числится"),
@@ -183,7 +183,7 @@ curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/
 как и для `install.sh`:
 
 ```sh
-curl -fsSL -o uninstall.sh "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/uninstall.sh"
+curl -fsSL -o uninstall.sh "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-KeeneticNetcraze-remote/netcraze-remote/uninstall.sh"
 sh uninstall.sh
 ```
 
@@ -198,7 +198,7 @@ PURGE=1 sh uninstall.sh
 ### Hub (VPS)
 
 ```sh
-wget -O uninstall-vps.sh "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/vps/uninstall-vps.sh"
+wget -O uninstall-vps.sh "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-KeeneticNetcraze-remote/netcraze-remote/vps/uninstall-vps.sh"
 sudo sh uninstall-vps.sh
 ```
 
@@ -420,7 +420,7 @@ Hub'а просто нет — `set-admin-password`/`regen-xray` из старо
   пишет файл, не трогает systemctl вообще.
 - Найдены и исправлены испорченные слепой заменой пути: `RAW_REPO_BASE`
   указывал на несуществующий `.../Vodkinnet-RT/main/vodkinnet-netcraze-remote`
-  вместо `.../vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote`;
+  вместо `.../vodkinnet-rt/main/vodkinnet-KeeneticNetcraze-remote/netcraze-remote`;
   такая же опечатка в ссылке на GitHub в шапке.
 - `reload_vps_xray()`/`restart_vps_xray()` (кнопки «Обновить Xray CFG»/
   «Рестарт Xray VPS») в оригинале owrt-remote зовут `systemctl` напрямую

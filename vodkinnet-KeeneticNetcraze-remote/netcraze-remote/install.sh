@@ -1,11 +1,11 @@
 #!/bin/sh
 # netcraze-remote — установка агента на Keenetic/KNDMS (через Entware).
 # Запуск на самом роутере (SSH после установки Entware):
-#   curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/install.sh?v=$(date +%s)" | sh
+#   curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-KeeneticNetcraze-remote/netcraze-remote/install.sh?v=$(date +%s)" | sh
 
 set -eu
 
-REPO_RAW="https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote"
+REPO_RAW="https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-KeeneticNetcraze-remote/netcraze-remote"
 
 C_RED='\033[0;31m'; C_GREEN='\033[0;32m'; C_YELLOW='\033[1;33m'; C_NC='\033[0m'
 ok()   { printf '%b[+]%b %s\n' "$C_GREEN" "$C_NC" "$*"; }
