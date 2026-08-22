@@ -816,34 +816,17 @@ wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/m
 
 <br><br>
 
-<code>/usr/sbin/owrt-remote</code><br>
-<code>/etc/init.d/owrt-remote</code><br>
+<code>/usr/sbin/owrt-remote</code> (и <code>.bak</code>)<br>
+<code>/usr/sbin/owrt-remote-watchdog</code><br>
+<code>/etc/init.d/owrt-remote</code> (и <code>.bak</code>)<br>
+строка <code>owrt-remote-watchdog</code> в <code>/etc/crontabs/root</code><br>
+<code>/etc/owrt-remote-update-pending</code>, <code>/etc/owrt-remote-rollback.log</code><br>
 <code>/www/cgi-bin/owrt-remote</code><br>
 пункт меню LuCI<br>
 rpcd ACL<br>
 <code>/etc/config/owrtremote</code><br>
 <code>/etc/owrt-remote/web.key</code><br>
 <code>/etc/xray/owrt-remote-client.json</code>
-
-<br><br>
-
-⚠️ Пока НЕ удаляется (известный пробел, не покрыт этим PR):
-<code>/usr/sbin/owrt-remote-watchdog</code>, файлы <code>.bak</code>
-(агент и init.d), строка в <code>/etc/crontabs/root</code>,
-<code>/etc/owrt-remote-update-pending</code>,
-<code>/etc/owrt-remote-rollback.log</code>. Убрать руками:
-
-</div>
-
-```sh
-rm -f /usr/sbin/owrt-remote-watchdog /usr/sbin/owrt-remote.bak \
-      /etc/init.d/owrt-remote.bak /etc/owrt-remote-update-pending \
-      /etc/owrt-remote-rollback.log
-sed -i '/owrt-remote-watchdog/d' /etc/crontabs/root
-/etc/init.d/cron restart
-```
-
-<div align="center">
 
 <br><br>
 

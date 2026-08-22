@@ -13,13 +13,36 @@ rmf() {
 	rm -f "$(target_path "$1")"
 }
 
+# VodkinNET: строка watchdog'а в cron — не "конфиг" и не идентификационные
+# данные, просто расписание вызова бинарника, который мы вот-вот удалим.
+# Оставленная строка молча логировала бы ошибку каждую минуту (cron всё
+# ещё будет пытаться запускать несуществующий /usr/sbin/owrt-remote-watchdog).
+remove_watchdog_cron() {
+	local cron_file
+	cron_file="$(target_path etc/crontabs/root)"
+	[ -f "$cron_file" ] || return 0
+	if grep -q "owrt-remote-watchdog" "$cron_file" 2>/dev/null; then
+		sed -i '/owrt-remote-watchdog/d' "$cron_file"
+		if [ -x "$(target_path etc/init.d/cron)" ]; then
+			"$(target_path etc/init.d/cron)" restart >/dev/null 2>&1 || true
+		fi
+	fi
+}
+
 if [ -x "$(target_path etc/init.d/owrt-remote)" ]; then
 	"$(target_path etc/init.d/owrt-remote)" stop >/dev/null 2>&1 || true
 	"$(target_path etc/init.d/owrt-remote)" disable >/dev/null 2>&1 || true
 fi
 
+remove_watchdog_cron
+
 rmf usr/sbin/owrt-remote
+rmf usr/sbin/owrt-remote.bak
+rmf usr/sbin/owrt-remote-watchdog
 rmf etc/init.d/owrt-remote
+rmf etc/init.d/owrt-remote.bak
+rmf etc/owrt-remote-update-pending
+rmf etc/owrt-remote-rollback.log
 rmf www/cgi-bin/owrt-remote
 rmf usr/lib/lua/luci/controller/owrt_remote.lua
 rmf usr/share/luci/menu.d/luci-app-owrt-remote.json
