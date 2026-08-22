@@ -5,7 +5,7 @@
 
 set -eu
 
-REPO_RAW="https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote"
+REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote}"
 
 C_RED='\033[0;31m'; C_GREEN='\033[0;32m'; C_YELLOW='\033[1;33m'; C_NC='\033[0m'
 ok()   { printf '%b[+]%b %s\n' "$C_GREEN" "$C_NC" "$*"; }
