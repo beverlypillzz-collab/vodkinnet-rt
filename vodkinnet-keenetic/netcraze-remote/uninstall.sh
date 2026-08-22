@@ -8,8 +8,22 @@ ok() { printf '%b[+]%b %s\n' "$C_GREEN" "$C_NC" "$*"; }
 
 [ -x /opt/sbin/netcraze-remote ] && /opt/sbin/netcraze-remote stop || true
 
+# VodkinNET: убираем watchdog из cron ДО удаления самого файла — иначе
+# следующий тик cron будет пытаться запустить уже несуществующий бинарник
+# и молча логировать ошибку каждую минуту.
+if [ -f /opt/etc/crontabs/root ] && grep -q "netcraze-remote-watchdog" /opt/etc/crontabs/root 2>/dev/null; then
+	sed -i '/netcraze-remote-watchdog/d' /opt/etc/crontabs/root
+	CRON_INITD="$(ls /opt/etc/init.d/S*cron* 2>/dev/null | head -n1 || true)"
+	[ -n "$CRON_INITD" ] && [ -x "$CRON_INITD" ] && "$CRON_INITD" restart >/dev/null 2>&1 || true
+fi
+
 rm -f /opt/etc/init.d/S99netcraze-remote
+rm -f /opt/etc/init.d/S99netcraze-remote.bak
 rm -f /opt/sbin/netcraze-remote
+rm -f /opt/sbin/netcraze-remote.bak
+rm -f /opt/sbin/netcraze-remote-watchdog
+rm -f /opt/etc/netcraze-remote/update-pending
+rm -f /opt/var/log/netcraze-remote-rollback.log
 rm -f /opt/etc/netcraze-remote/xray-client.json
 rm -rf /opt/var/run/netcraze-remote
 rm -f /opt/var/log/netcraze-remote.log
