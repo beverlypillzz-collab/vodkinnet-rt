@@ -32,6 +32,8 @@ fi
 # не поднялся за rollback_grace_seconds (uci, по умолчанию 30).
 OWRT_REMOTE_BIN="/usr/sbin/owrt-remote"
 OWRT_REMOTE_BAK="${OWRT_REMOTE_BIN}.bak"
+OWRT_REMOTE_INITD="/etc/init.d/owrt-remote"
+OWRT_REMOTE_INITD_BAK="${OWRT_REMOTE_INITD}.bak"
 UPDATE_MARKER="/etc/owrt-remote-update-pending"
 ROLLBACK_LOG="/etc/owrt-remote-rollback.log"
 
@@ -766,6 +768,21 @@ rollback_agent() {
 		rm -f "$tmp_bin"
 		log "ROLLBACK: не смог подготовить временную копию из ${OWRT_REMOTE_BAK}, откат прерван"
 		return 1
+	fi
+
+	# VodkinNET: install.sh (в отличие от `owrt-remote update`, который
+	# трогает только сам агент) при апдейте бэкапит ОБА файла — агент и
+	# init.d — потому что init.d тоже может всё сломать (см. баг с
+	# stop_service(), убивавшим только xray). Если бэкап init.d есть,
+	# восстанавливаем и его той же tmp+mv-схемой.
+	if [ -f "$OWRT_REMOTE_INITD_BAK" ]; then
+		local tmp_initd="${OWRT_REMOTE_INITD}.rollback.$$"
+		if cp "$OWRT_REMOTE_INITD_BAK" "$tmp_initd" 2>/dev/null && chmod +x "$tmp_initd" 2>/dev/null; then
+			mv "$tmp_initd" "$OWRT_REMOTE_INITD"
+		else
+			rm -f "$tmp_initd"
+			log "ROLLBACK: не смог восстановить init.d из ${OWRT_REMOTE_INITD_BAK} (агент всё равно откачен)"
+		fi
 	fi
 
 	rm -f "$UPDATE_MARKER"

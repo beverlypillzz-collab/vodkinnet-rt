@@ -23,6 +23,8 @@ CONFIG="owrtremote"
 SECTION="main"
 BIN="/usr/sbin/owrt-remote"
 BAK="${BIN}.bak"
+INITD="/etc/init.d/owrt-remote"
+INITD_BAK="${INITD}.bak"
 MARKER="/etc/owrt-remote-update-pending"
 LOG="/etc/owrt-remote-rollback.log"
 
@@ -120,6 +122,20 @@ else
 	rm -f "$tmp"
 	logger -t owrt-remote-watchdog "rollback failed: could not prepare temp copy from $BAK"
 	exit 1
+fi
+
+# VodkinNET: install.sh бэкапит и init.d (не только сам агент) — тот же
+# файл, что уже один раз молча ронял heartbeat-инстанс при restart. Если
+# бэкап init.d есть, откатываем и его — той же независимой, ничего не
+# исполняющей из owrt-remote схемой.
+if [ -f "$INITD_BAK" ]; then
+	tmp_initd="${INITD}.watchdog.$$"
+	if cp "$INITD_BAK" "$tmp_initd" 2>/dev/null && chmod +x "$tmp_initd" 2>/dev/null; then
+		mv "$tmp_initd" "$INITD"
+	else
+		rm -f "$tmp_initd"
+		logger -t owrt-remote-watchdog "rollback: could not restore init.d from $INITD_BAK (agent still rolled back)"
+	fi
 fi
 
 rm -f "$MARKER"
