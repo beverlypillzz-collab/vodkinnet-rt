@@ -1053,6 +1053,19 @@ def connect(db_path=DB_PATH):
     ensure_state()
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
+    try:
+        os.chmod(db_path, 0o600)
+    except OSError:
+        pass
+    # sqlite in WAL mode leaves -wal/-shm sidecars that can also hold live
+    # rows; lock those down too, not just the main db file.
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = Path(str(db_path) + suffix)
+        if sidecar.exists():
+            try:
+                os.chmod(sidecar, 0o600)
+            except OSError:
+                pass
     return conn
 
 
