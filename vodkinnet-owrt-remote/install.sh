@@ -253,7 +253,35 @@ install_xray_runtime() {
 	"$remote_bin" install-xray-tmp || die "failed to install Xray to /tmp"
 }
 
+# VodkinNET: owrt-remote-watchdog — намеренно отдельный от owrt-remote файл
+# (см. комментарий в самом watchdog-скрипте: не должен зависеть от
+# исправности агента, который он же и откатывает). В install.sh он поэтому
+# тоже ставится и включается отдельным шагом, не как часть install_file()
+# основного агента. Идемпотентно: повторный запуск install.sh (переустановка
+# существующего роутера при апдейте фикса) не плодит вторую строку в cron.
+install_watchdog_cron() {
+	local cron_file marker cron_line
+	cron_file="$(target_path etc/crontabs/root)"
+	marker="owrt-remote-watchdog"
+	cron_line="* * * * * /usr/sbin/owrt-remote-watchdog"
+
+	mkdir -p "$(dirname "$cron_file")"
+	[ -f "$cron_file" ] || : >"$cron_file"
+
+	if grep -q "$marker" "$cron_file" 2>/dev/null; then
+		return 0
+	fi
+
+	printf '%s\n' "$cron_line" >>"$cron_file"
+	info "owrt-remote-watchdog добавлен в cron (проверка раз в минуту)."
+
+	if [ -x "$(target_path etc/init.d/cron)" ]; then
+		"$(target_path etc/init.d/cron)" restart >/dev/null 2>&1 || true
+	fi
+}
+
 install_file "usr/sbin/owrt-remote" 0755
+install_file "usr/sbin/owrt-remote-watchdog" 0755
 install_file "etc/init.d/owrt-remote" 0755
 install_config
 install_file "www/cgi-bin/owrt-remote" 0755
@@ -273,6 +301,7 @@ if [ -x "$(target_path etc/init.d/uhttpd)" ]; then
 fi
 
 install_xray_runtime
+install_watchdog_cron
 
 # VodkinNET: fleet standard — management daemons are bound to the 'lan'
 # interface only (not loopback), as part of the "manage from one admin IP
