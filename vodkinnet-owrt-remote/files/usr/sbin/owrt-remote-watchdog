@@ -52,8 +52,8 @@ esac
 now="$(date +%s 2>/dev/null || echo 0)"
 elapsed=$((now - marker_ts))
 
-grace="$(uci_get rollback_grace_seconds 90)"
-case "$grace" in ''|*[!0-9]*) grace=90 ;; esac
+grace="$(uci_get rollback_grace_seconds 30)"
+case "$grace" in ''|*[!0-9]*) grace=30 ;; esac
 
 vps_host="$(uci_get vps_host '')"
 vps_port="$(uci_get vps_port 8443)"
