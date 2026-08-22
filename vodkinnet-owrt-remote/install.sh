@@ -153,6 +153,115 @@ install_file() {
 	chmod "$mode" "$dst"
 }
 
+# VodkinNET: для shell-скриптов, которые исполняются позже без нашего
+# присмотра (watchdog — раз в минуту через cron), проверяем sh -n ДО
+# установки той же схемой tmp+mv, что и в install_owrt_remote_core() —
+# битый файл не должен вообще попасть на диск по целевому пути.
+install_file_checked() {
+	local rel mode dst tmp bust
+	rel="$1"
+	mode="$2"
+	dst="$(target_path "$rel")"
+	tmp="${dst}.new.$$"
+	mkdir -p "$(dirname "$dst")"
+
+	if [ -f "$SCRIPT_DIR/files/$rel" ]; then
+		cp "$SCRIPT_DIR/files/$rel" "$tmp"
+	else
+		bust="$(date +%s 2>/dev/null || echo $$)"
+		fetch "$RAW_URL/files/$rel?v=$bust" "$tmp"
+	fi
+
+	if ! sh -n "$tmp"; then
+		rm -f "$tmp"
+		die "$rel не проходит проверку синтаксиса (sh -n) — установка остановлена"
+	fi
+
+	chmod "$mode" "$tmp"
+	mv "$tmp" "$dst"
+}
+
+# VodkinNET: install.sh как одновременно и install-, и update-скрипт.
+# Раньше повторный запуск install.sh на уже развёрнутом роутере просто
+# перезаписывал usr/sbin/owrt-remote и etc/init.d/owrt-remote "начисто" —
+# без бэкапа и без подключения к self-heal/watchdog-механизму из
+# `owrt-remote update`. Один плохой коммит в files/ — и переустановка
+# флота этим же install.sh рисковала тем же способом, что мы уже ловили
+# руками на канарейке (тунель не поднялся, откатывать нечем и некому).
+#
+# Эта функция даёт install.sh те же гарантии:
+#   - sh -n новых файлов ДО установки (не только для owrt-remote, но и
+#     для init.d — тот самый файл, что уже один раз тихо ронял heartbeat-
+#     инстанс при restart);
+#   - если это ОБНОВЛЕНИЕ существующей установки (bin уже был) — текущие
+#     версии обоих файлов бэкапятся в .bak (agent) / .bak (init.d);
+#   - установка — атомарный mv, не cp поверх места назначения;
+#   - выставляется тот же UPDATE_MARKER
+#     (/etc/owrt-remote-update-pending), что читают self_heal_check() в
+#     heartbeat_loop() САМОГО агента и независимый owrt-remote-watchdog —
+#     то есть install.sh-апдейт проверяется и откатывается той же
+#     инфраструктурой, что и `owrt-remote update`, без дублирования логики.
+#   - на ПЕРВОЙ установке (bin ещё не было) маркер не ставится — откатывать
+#     не на что, шуметь незачем.
+install_owrt_remote_core() {
+	local bin_rel initd_rel bin_dst initd_dst bin_bak initd_bak
+	local tmp_bin tmp_initd bin_existed marker bust
+
+	bin_rel="usr/sbin/owrt-remote"
+	initd_rel="etc/init.d/owrt-remote"
+	bin_dst="$(target_path "$bin_rel")"
+	initd_dst="$(target_path "$initd_rel")"
+	bin_bak="${bin_dst}.bak"
+	initd_bak="${initd_dst}.bak"
+	marker="$(target_path etc/owrt-remote-update-pending)"
+
+	bin_existed=0
+	[ -f "$bin_dst" ] && bin_existed=1
+
+	mkdir -p "$(dirname "$bin_dst")" "$(dirname "$initd_dst")"
+
+	tmp_bin="${bin_dst}.new.$$"
+	tmp_initd="${initd_dst}.new.$$"
+
+	if [ -f "$SCRIPT_DIR/files/$bin_rel" ]; then
+		cp "$SCRIPT_DIR/files/$bin_rel" "$tmp_bin"
+	else
+		bust="$(date +%s 2>/dev/null || echo $$)"
+		fetch "$RAW_URL/files/$bin_rel?v=$bust" "$tmp_bin"
+	fi
+	if [ -f "$SCRIPT_DIR/files/$initd_rel" ]; then
+		cp "$SCRIPT_DIR/files/$initd_rel" "$tmp_initd"
+	else
+		bust="$(date +%s 2>/dev/null || echo $$)"
+		fetch "$RAW_URL/files/$initd_rel?v=$bust" "$tmp_initd"
+	fi
+
+	if ! sh -n "$tmp_bin"; then
+		rm -f "$tmp_bin" "$tmp_initd"
+		die "новый owrt-remote не проходит проверку синтаксиса (sh -n) — установка остановлена, текущие файлы не тронуты"
+	fi
+	if ! sh -n "$tmp_initd"; then
+		rm -f "$tmp_bin" "$tmp_initd"
+		die "новый init.d/owrt-remote не проходит проверку синтаксиса (sh -n) — установка остановлена, текущие файлы не тронуты"
+	fi
+
+	chmod 0755 "$tmp_bin" "$tmp_initd"
+
+	if [ "$bin_existed" = "1" ]; then
+		cp "$bin_dst" "$bin_bak" 2>/dev/null || true
+		[ -f "$initd_dst" ] && cp "$initd_dst" "$initd_bak" 2>/dev/null || true
+	fi
+
+	mv "$tmp_bin" "$bin_dst"
+	mv "$tmp_initd" "$initd_dst"
+
+	if [ "$bin_existed" = "1" ]; then
+		date +%s >"$marker" 2>/dev/null || echo 0 >"$marker"
+		info "Обнаружена предыдущая установка агента — бэкап сохранён (owrt-remote.bak / init.d.bak)."
+		info "После рестарта self-heal (heartbeat-loop) и owrt-remote-watchdog сами проверят туннель и откатят, если тот не поднимется."
+	fi
+}
+
 install_config() {
 	local rel src dst bust
 	rel="etc/config/owrtremote"
@@ -253,8 +362,35 @@ install_xray_runtime() {
 	"$remote_bin" install-xray-tmp || die "failed to install Xray to /tmp"
 }
 
-install_file "usr/sbin/owrt-remote" 0755
-install_file "etc/init.d/owrt-remote" 0755
+# VodkinNET: owrt-remote-watchdog — намеренно отдельный от owrt-remote файл
+# (см. комментарий в самом watchdog-скрипте: не должен зависеть от
+# исправности агента, который он же и откатывает). В install.sh он поэтому
+# тоже ставится и включается отдельным шагом, не как часть install_file()
+# основного агента. Идемпотентно: повторный запуск install.sh (переустановка
+# существующего роутера при апдейте фикса) не плодит вторую строку в cron.
+install_watchdog_cron() {
+	local cron_file marker cron_line
+	cron_file="$(target_path etc/crontabs/root)"
+	marker="owrt-remote-watchdog"
+	cron_line="* * * * * /usr/sbin/owrt-remote-watchdog"
+
+	mkdir -p "$(dirname "$cron_file")"
+	[ -f "$cron_file" ] || : >"$cron_file"
+
+	if grep -q "$marker" "$cron_file" 2>/dev/null; then
+		return 0
+	fi
+
+	printf '%s\n' "$cron_line" >>"$cron_file"
+	info "owrt-remote-watchdog добавлен в cron (проверка раз в минуту)."
+
+	if [ -x "$(target_path etc/init.d/cron)" ]; then
+		"$(target_path etc/init.d/cron)" restart >/dev/null 2>&1 || true
+	fi
+}
+
+install_owrt_remote_core
+install_file_checked "usr/sbin/owrt-remote-watchdog" 0755
 install_config
 install_file "www/cgi-bin/owrt-remote" 0755
 install_file "usr/share/luci/menu.d/luci-app-owrt-remote.json" 0644
@@ -273,6 +409,7 @@ if [ -x "$(target_path etc/init.d/uhttpd)" ]; then
 fi
 
 install_xray_runtime
+install_watchdog_cron
 
 # VodkinNET: fleet standard — management daemons are bound to the 'lan'
 # interface only (not loopback), as part of the "manage from one admin IP

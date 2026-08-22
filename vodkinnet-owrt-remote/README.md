@@ -268,6 +268,92 @@ owrt-remote doctor
 owrt-remote status
 ```
 
+<h3> Обновление агента — тот же install.sh</h3>
+
+`install.sh` работает и как первая установка, и как апдейт — сам
+определяет, что перед ним, по наличию текущего `owrt-remote`. На
+уже развёрнутом роутере повторный запуск той же команды:
+
+```sh
+wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/install.sh?v=$(date +%s)" | sh
+```
+
+- проверяет синтаксис (`sh -n`) новых файлов **до** установки — битый
+  файл не попадёт на диск вообще;
+- бэкапит текущий агент и `init.d`-скрипт (`.bak`);
+- ставит новые версии атомарно (`mv`, не перезапись на месте);
+- подключает **тот же** self-heal/watchdog-механизм, что и ручной
+  `owrt-remote update` — если после апдейта туннель не поднимется за
+  `rollback_grace_seconds` (uci, по умолчанию **30с**), агент откатится
+  на `.bak` сам, без участия человека.
+
+`/etc/config/owrtremote` при этом не трогается — существующие
+`vps_host`, токены и прочие настройки остаются как есть.
+
+<h3> Обновление вручную, без переустановки всего пакета</h3>
+
+Если нужно накатить только новый `/usr/sbin/owrt-remote` (например,
+тестовую сборку), не трогая остальные файлы:
+
+```sh
+owrt-remote update /path/to/new/owrt-remote
+```
+
+Тот же бэкап, тот же rollback по таймауту. Ручной немедленный откат
+и разовая проверка живости туннеля:
+
+```sh
+owrt-remote rollback
+owrt-remote tunnel-check
+```
+
+**Важно:** rollback-логика намеренно живёт в двух независимых местах —
+`self_heal_check()` внутри самого агента (быстрый путь) и отдельный
+`owrt-remote-watchdog` на cron, который вообще не исполняет код агента
+и не зависит от того, насколько сломан новый апдейт. `install.sh`
+ставит и настраивает watchdog автоматически (крон-запись раз в минуту),
+руками ничего дополнительно делать не нужно.
+
+<h3> Проверка cron-задачи watchdog</h3>
+
+Watchdog бесполезен, если cron его не запускает — стоит проверить это
+один раз после установки, не дожидаясь реального сбойного апдейта:
+
+```sh
+# 1. Запись реально есть в crontab
+grep owrt-remote-watchdog /etc/crontabs/root
+```
+
+```sh
+# 2. crond вообще запущен
+ps w | grep '[c]rond'
+```
+
+```sh
+# 3. Сам файл существует, исполняемый, и не бьётся по синтаксису
+ls -l /usr/sbin/owrt-remote-watchdog
+sh -n /usr/sbin/owrt-remote-watchdog && echo "синтаксис ок"
+```
+
+```sh
+# 4. Ручной прогон — безопасно запускать вручную в любой момент:
+#    если маркера обновления нет, скрипт мгновенно завершится без
+#    побочных эффектов (это его нормальное поведение 59 раз из 60)
+/usr/sbin/owrt-remote-watchdog; echo "код выхода: $?"
+```
+
+```sh
+# 5. Реально ли cron его запускает по расписанию (не только "запись есть")
+logread | grep -i "cron.*owrt-remote-watchdog"
+```
+
+Если пункт 1 или 2 пустой — cron не подхватил задачу или не запущен:
+
+```sh
+echo "* * * * * /usr/sbin/owrt-remote-watchdog" >> /etc/crontabs/root
+/etc/init.d/cron restart
+```
+
 </div>
 
 ---
@@ -355,6 +441,10 @@ flowchart LR
 <tr>
 <td align="center"> <b>Doctor / Status</b></td>
 <td align="center">Команды диагностики на OpenWrt</td>
+</tr>
+<tr>
+<td align="center"> <b>Auto-rollback агента</b></td>
+<td align="center">Независимый cron-watchdog откатывает обновление, если туннель не поднялся</td>
 </tr>
 </table>
 
@@ -633,6 +723,49 @@ owrt-remote heartbeat
 </details>
 
 <details>
+<summary align="center"><b> После обновления агента пропала связь с роутером</b></summary>
+
+<div align="center">
+
+Это ожидаемо в течение первых ~30 секунд после <code>owrt-remote update</code>
+или повторного запуска <code>install.sh</code> — сервис перезапускается,
+туннель на секунды обрывается. Если связь не восстановилась сама:
+
+<br><br>
+
+Подожди <code>rollback_grace_seconds</code> (по умолчанию 30с) плюс до
+минуты — <code>owrt-remote-watchdog</code> тикает по cron раз в минуту
+и откатит агент на <code>.bak</code> сам, если новый туннель так и не
+поднялся. Это не требует, чтобы новый агент вообще был исправен —
+watchdog не исполняет и не импортирует его код.
+
+<br><br>
+
+Если LAN-доступ есть, проверь напрямую:
+
+</div>
+
+```sh
+owrt-remote tunnel-check
+cat /etc/owrt-remote-rollback.log
+md5sum /usr/sbin/owrt-remote /usr/sbin/owrt-remote.bak
+```
+
+<div align="center">
+
+Если <code>rollback.log</code> пуст, а связи всё ещё нет — проверь,
+что cron реально знает про watchdog:
+
+</div>
+
+```sh
+grep owrt-remote-watchdog /etc/crontabs/root
+ps w | grep '[c]rond'
+```
+
+</details>
+
+<details>
 <summary align="center"><b> С мобильного интернета не открывается</b></summary>
 
 <div align="center">
@@ -723,8 +856,11 @@ wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/m
 
 <br><br>
 
-<code>/usr/sbin/owrt-remote</code><br>
-<code>/etc/init.d/owrt-remote</code><br>
+<code>/usr/sbin/owrt-remote</code> (и <code>.bak</code>)<br>
+<code>/usr/sbin/owrt-remote-watchdog</code><br>
+<code>/etc/init.d/owrt-remote</code> (и <code>.bak</code>)<br>
+строка <code>owrt-remote-watchdog</code> в <code>/etc/crontabs/root</code><br>
+<code>/etc/owrt-remote-update-pending</code>, <code>/etc/owrt-remote-rollback.log</code><br>
 <code>/www/cgi-bin/owrt-remote</code><br>
 пункт меню LuCI<br>
 rpcd ACL<br>
@@ -758,14 +894,20 @@ wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/m
 ```text
 .
 ├── install.sh
-│   └── установка агента на OpenWrt
+│   └── установка агента на OpenWrt (и апдейт при повторном запуске:
+│       бэкап + rollback-маркер + идемпотентная установка cron)
 ├── uninstall.sh
 │   └── удаление агента с OpenWrt
 ├── files/
 │   ├── usr/sbin/owrt-remote
-│   │   └── CLI-агент, heartbeat, render-client, doctor
+│   │   └── CLI-агент: heartbeat, render-client, doctor,
+│   │       update/rollback/tunnel-check
+│   ├── usr/sbin/owrt-remote-watchdog
+│   │   └── независимый cron-джоб: откатывает .bak, если туннель не
+│   │       поднялся за rollback_grace_seconds — не зависит от
+│   │       исправности самого агента
 │   ├── etc/init.d/owrt-remote
-│   │   └── procd-сервис OpenWrt
+│   │   └── procd-сервис OpenWrt (xray + heartbeat-loop инстансы)
 │   ├── www/cgi-bin/owrt-remote
 │   │   └── веб-панель на роутере
 │   ├── usr/share/luci/menu.d/luci-app-owrt-remote.json
@@ -833,6 +975,26 @@ wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/m
 <td align="center">OpenWrt</td>
 <td align="center"><code>owrt-remote heartbeat</code></td>
 <td align="center">отправить heartbeat</td>
+</tr>
+<tr>
+<td align="center">OpenWrt</td>
+<td align="center"><code>owrt-remote update /path/to/new</code></td>
+<td align="center">обновить агент с бэкапом и авто-rollback</td>
+</tr>
+<tr>
+<td align="center">OpenWrt</td>
+<td align="center"><code>owrt-remote rollback</code></td>
+<td align="center">немедленный ручной откат на .bak</td>
+</tr>
+<tr>
+<td align="center">OpenWrt</td>
+<td align="center"><code>owrt-remote tunnel-check</code></td>
+<td align="center">реальная проверка ESTABLISHED-туннеля</td>
+</tr>
+<tr>
+<td align="center">OpenWrt</td>
+<td align="center"><code>cat /etc/owrt-remote-rollback.log</code></td>
+<td align="center">история автооткатов (agent + watchdog)</td>
 </tr>
 </table>
 
@@ -926,3 +1088,49 @@ nginx) — но этим же случайно выключили TLS и у ту
 файл, что фигурирует в записи про миграцию выше, просто под другим
 именем, чем в `install-vps.sh`; для будущих переустановок это уже не
 имеет значения, там всё в одном месте).
+
+### 2026-08-23 — auto-rollback агента после обновления, найдено вживую на канарейке
+
+**Что случилось**: при подготовке rollback-механизма для `owrt-remote update`
+на канареечном роутере (`VodkinR1_Router`) последовательно поймали три
+живых бага, каждый следующий — при тестировании фикса предыдущего.
+
+**Баг 1 — init.d глушил только xray при restart.** Кастомный
+`stop_service()` останавливал xray-процесс через ручной скан
+`/proc/*/cmdline`, но не heartbeat-инстанс — procd считал его всё ещё
+живым и не перезапускал. Итог: `restart` не подтягивал новый код агента
+в память работающего процесса, хотя на диске новый файл уже стоял.
+**Исправлено**: кастомный `stop_service()` убран целиком — procd сам
+знает PID обоих зарегистрированных инстансов и корректно их
+останавливает.
+
+**Баг 2 — self-overwrite при обновлении.** `cp` поверх
+`/usr/sbin/owrt-remote` переписывал тот же inode, из которого читал
+себя работающий процесс (сам `update`, либо `heartbeat-loop` при
+откате). На практике один раз это привело к тому, что сервис после
+`update` не поднялся вообще, без единой строки в логе. **Исправлено**:
+запись во временный файл + `mv` (атомарная замена имени, не трогает уже
+открытый файловый дескриптор) — везде, где агент или install.sh пишут
+поверх своих же рабочих файлов.
+
+**Баг 3 (архитектурный, важнее первых двух) — rollback-логика жила
+внутри обновляемого файла.** Если апдейт ставит настолько сломанную
+версию, что даже `heartbeat-loop` не поднимается — откатывать некому.
+**Исправлено**: `owrt-remote-watchdog` — полностью отдельный файл,
+`update`/`install.sh` его никогда не перезаписывают при апдейте самого
+агента, запускается через cron (не procd-инстанс сервиса), не исполняет
+и не импортирует ничего из `owrt-remote`. Живьём воспроизведено: после
+намеренно сломанного тестового апдейта `heartbeat-loop` сам не смог
+откатиться (тот же self-overwrite баг), но независимый watchdog откатил
+`.bak` штатно на следующем тике cron:
+```
+2026-08-23 01:11:00 watchdog: откат выполнен (туннель не поднялся за 20с, прошло 28с)
+```
+
+**Итог**: `owrt-remote update <path>` и повторный запуск `install.sh`
+теперь дают одинаковые гарантии — бэкап агента и `init.d`, `sh -n`
+до установки, атомарная замена, и двойная защита (self-heal в самом
+агенте + независимый cron-watchdog) на случай, если апдейт настолько
+плох, что агент вообще не может себя спасти. `rollback_grace_seconds`
+(uci) — 30с по умолчанию.
+
