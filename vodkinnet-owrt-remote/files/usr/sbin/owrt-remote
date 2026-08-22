@@ -22,6 +22,21 @@ else
 	C_NC=''
 fi
 
+# VodkinNET: self-heal / rollback после обновления агента.
+# OWRT_REMOTE_BIN — путь к самому этому скрипту (тот файл, который меняется
+# при "git pull" + переустановке пакета); OWRT_REMOTE_BAK — предыдущая
+# рабочая копия, сохраняется командой `update`, никогда не удаляется молча.
+# UPDATE_MARKER хранит unix-время начала последнего обновления; пока файл
+# существует, heartbeat_loop() проверяет реальную живость туннеля
+# (не просто "процесс xray запущен") и откатывает бинарник, если туннель
+# не поднялся за rollback_grace_seconds (uci, по умолчанию 30).
+OWRT_REMOTE_BIN="/usr/sbin/owrt-remote"
+OWRT_REMOTE_BAK="${OWRT_REMOTE_BIN}.bak"
+OWRT_REMOTE_INITD="/etc/init.d/owrt-remote"
+OWRT_REMOTE_INITD_BAK="${OWRT_REMOTE_INITD}.bak"
+UPDATE_MARKER="/etc/owrt-remote-update-pending"
+ROLLBACK_LOG="/etc/owrt-remote-rollback.log"
+
 log() {
 	printf '%s\n' "$*" >&2
 }
@@ -46,8 +61,25 @@ usage() {
   owrt-remote run
   owrt-remote heartbeat
   owrt-remote heartbeat-loop
+  owrt-remote update /path/to/new/owrt-remote
+  owrt-remote rollback
+  owrt-remote tunnel-check
 
 Настройки лежат в /etc/config/owrtremote.
+
+update:
+  Бэкапит текущий /usr/sbin/owrt-remote в owrt-remote.bak, ставит новый
+  файл, взводит UPDATE_MARKER и рестартит сервис. heartbeat-loop сам
+  проверит через rollback_grace_seconds (uci, по умолчанию 30с), поднялся
+  ли реальный туннель, и откатит бинарник назад, если нет — без участия
+  человека (актуально, если SSH-сессия к этому моменту уже недоступна).
+
+rollback:
+  Ручной немедленный откат на owrt-remote.bak, без ожидания.
+
+tunnel-check:
+  Разовая проверка: есть ли ESTABLISHED TCP-сессия к vps_host:vps_port
+  (реальный туннель), а не просто "процесс xray запущен".
 EOF
 }
 
@@ -279,6 +311,59 @@ stop_xray() {
 
 ssh_running() {
 	ps_all | grep '[d]ropbear' >/dev/null 2>&1
+}
+
+# VodkinNET: xray_running() (выше) — a классический источник ложного "ок":
+# показывает процесс, но не факт, что реверс-туннель реально поднят
+# (см. reverse-tag mismatch баг: heartbeat репортил "online" при мёртвом
+# туннеле). tunnel_established() проверяет напрямую /proc/net/tcp —
+# есть ли ESTABLISHED TCP-сессия именно к vps_host:vps_port. Это не ловит
+# баги уровня VLESS/reverse-tag (TCP может быть up, а реверс-маршрут внутри
+# Xray — сломан), но ловит подавляющее большинство того, что реально ломает
+# обновление агента: невалидный конфиг, Xray не стартует, неверный
+# host/port/TLS, бесконечный reconnect-луп (тогда сокет в SYN_SENT,
+# не ESTABLISHED).
+is_ipv4_literal() {
+	case "$1" in
+		''|*[!0-9.]*) return 1 ;;
+	esac
+	case "$1" in
+		*.*.*.*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+tunnel_established() {
+	local vps_host vps_port hex_port a b c d hex_ip pattern found
+
+	vps_host="$(uci_get vps_host '')"
+	vps_port="$(safe_num "$(uci_get vps_port 8443)" 8443)"
+	[ -n "$vps_host" ] || return 1
+	[ -r /proc/net/tcp ] || return 1
+
+	hex_port="$(printf '%04X' "$vps_port")"
+
+	if is_ipv4_literal "$vps_host"; then
+		IFS=. read -r a b c d <<-EOF_VPSIP
+$vps_host
+EOF_VPSIP
+		# VodkinNET: /proc/net/tcp хранит remote_address как HEXIP:HEXPORT,
+		# где HEXIP — байты IPv4 в ОБРАТНОМ порядке (little-endian per
+		# 32-bit слово), т.е. для d.c.b.a, не a.b.c.d.
+		hex_ip="$(printf '%02X%02X%02X%02X' "$d" "$c" "$b" "$a")"
+		pattern="${hex_ip}:${hex_port}"
+		found="$(awk -v p="$pattern" '$4=="01" && $3==p {print "1"; exit}' /proc/net/tcp)"
+	else
+		# vps_host — не голый IPv4 (доменное имя). Резолвить внутри shell
+		# на роутере — лишняя точка отказа, поэтому матчим только по
+		# удалённому порту: слабее (не различает адрес), но не требует DNS.
+		pattern=":${hex_port}"
+		found="$(awk -v p="$pattern" -v plen="${#pattern}" \
+			'$4=="01" { if (substr($3, length($3)-plen+1) == p) { print "1"; exit } }' \
+			/proc/net/tcp)"
+	fi
+
+	[ "$found" = "1" ]
 }
 
 xray_bin_path() {
@@ -659,12 +744,131 @@ send_heartbeat() {
 	rm -f "$tmp"
 }
 
+rollback_agent() {
+	local reason="$1"
+
+	if [ ! -x "$OWRT_REMOTE_BAK" ]; then
+		log "ROLLBACK запрошен (${reason}), но ${OWRT_REMOTE_BAK} отсутствует — нечего накатывать назад"
+		rm -f "$UPDATE_MARKER"
+		return 1
+	fi
+
+	log "ROLLBACK: ${reason} — восстанавливаю ${OWRT_REMOTE_BIN} из ${OWRT_REMOTE_BAK}"
+
+	# VodkinNET: НЕ "cp $OWRT_REMOTE_BAK $OWRT_REMOTE_BIN" — это переписало
+	# бы содержимое ПО ТОМУ ЖЕ inode, из которого прямо сейчас читает сам
+	# себя работающий процесс heartbeat-loop (мы вызваны ИЗ него). Пишем
+	# во временный файл и атомарно переименовываем (mv) поверх — уже
+	# открытый файловый дескриптор этого процесса продолжает безопасно
+	# дочитывать старое содержимое, новый inode виден только НОВЫМ open().
+	local tmp_bin="${OWRT_REMOTE_BIN}.rollback.$$"
+	if cp "$OWRT_REMOTE_BAK" "$tmp_bin" 2>/dev/null && chmod +x "$tmp_bin" 2>/dev/null; then
+		mv "$tmp_bin" "$OWRT_REMOTE_BIN"
+	else
+		rm -f "$tmp_bin"
+		log "ROLLBACK: не смог подготовить временную копию из ${OWRT_REMOTE_BAK}, откат прерван"
+		return 1
+	fi
+
+	# VodkinNET: install.sh (в отличие от `owrt-remote update`, который
+	# трогает только сам агент) при апдейте бэкапит ОБА файла — агент и
+	# init.d — потому что init.d тоже может всё сломать (см. баг с
+	# stop_service(), убивавшим только xray). Если бэкап init.d есть,
+	# восстанавливаем и его той же tmp+mv-схемой.
+	if [ -f "$OWRT_REMOTE_INITD_BAK" ]; then
+		local tmp_initd="${OWRT_REMOTE_INITD}.rollback.$$"
+		if cp "$OWRT_REMOTE_INITD_BAK" "$tmp_initd" 2>/dev/null && chmod +x "$tmp_initd" 2>/dev/null; then
+			mv "$tmp_initd" "$OWRT_REMOTE_INITD"
+		else
+			rm -f "$tmp_initd"
+			log "ROLLBACK: не смог восстановить init.d из ${OWRT_REMOTE_INITD_BAK} (агент всё равно откачен)"
+		fi
+	fi
+
+	rm -f "$UPDATE_MARKER"
+	printf '%s откат выполнен: %s\n' "$(date '+%F %T' 2>/dev/null || echo '?')" "$reason" >>"$ROLLBACK_LOG" 2>/dev/null
+
+	# VodkinNET: рестарт через init.d/procd, не exec из этого же процесса —
+	# heartbeat-инстанс продолжает жить (procd его не трогает), а
+	# xray-инстанс при рестарте подхватит уже откаченный /usr/sbin/owrt-remote
+	# с диска. Запускаем в фоне: если рестарт сам по себе подвиснет,
+	# heartbeat-loop не должен из-за этого зависнуть тоже.
+	( /etc/init.d/owrt-remote restart >/dev/null 2>&1 & )
+}
+
+self_heal_check() {
+	local marker_ts now elapsed grace
+
+	[ -f "$UPDATE_MARKER" ] || return 0
+
+	marker_ts="$(cat "$UPDATE_MARKER" 2>/dev/null)"
+	case "$marker_ts" in
+		''|*[!0-9]*)
+			# битый маркер — не даём self-heal застрять в цикле навсегда
+			rm -f "$UPDATE_MARKER"
+			return 0
+			;;
+	esac
+
+	if tunnel_established; then
+		log "self-heal: туннель поднят после обновления агента — подтверждаю новую версию"
+		rm -f "$UPDATE_MARKER"
+		return 0
+	fi
+
+	now="$(date +%s 2>/dev/null || echo 0)"
+	elapsed=$((now - marker_ts))
+	grace="$(safe_num "$(uci_get rollback_grace_seconds 30)" 30)"
+
+	if [ "$elapsed" -ge "$grace" ]; then
+		rollback_agent "туннель не поднялся за ${grace}с после обновления агента"
+	else
+		log "self-heal: жду туннель после обновления, прошло ${elapsed}с из ${grace}с"
+	fi
+}
+
+update_agent() {
+	local newfile grace tmp_bin
+	newfile="$1"
+	[ -n "$newfile" ] || die "использование: owrt-remote update /path/to/new/owrt-remote"
+	[ -r "$newfile" ] || die "файл не читается: $newfile"
+
+	sh -n "$newfile" || die "новый файл не прошёл проверку синтаксиса (sh -n) — не устанавливаю"
+
+	cp "$OWRT_REMOTE_BIN" "$OWRT_REMOTE_BAK" || die "не смог сделать бэкап текущего бинарника, обновление остановлено"
+
+	# VodkinNET: та же ловушка "самоперезаписывающегося скрипта", что и в
+	# rollback_agent() — этот процесс (owrt-remote update ...) сам прямо
+	# сейчас исполняется из $OWRT_REMOTE_BIN. "cp $newfile $OWRT_REMOTE_BIN"
+	# переписал бы тот же inode, из которого интерпретатор ещё может
+	# дочитывать хвост этой же функции и весь код ниже (включая финальный
+	# `/etc/init.d/... restart`) — на практике это один раз привело к тому,
+	# что сервис после update вообще не поднялся, без единой строки в логе.
+	# Пишем в отдельный временный файл и подменяем одним mv (rename) —
+	# атомарно относительно уже открытого дескриптора этого же процесса.
+	tmp_bin="${OWRT_REMOTE_BIN}.new.$$"
+	if ! cp "$newfile" "$tmp_bin" || ! chmod +x "$tmp_bin"; then
+		rm -f "$tmp_bin"
+		log "установка нового файла не удалась — текущий бинарник не тронут (бэкап тоже цел)"
+		return 1
+	fi
+	mv "$tmp_bin" "$OWRT_REMOTE_BIN"
+
+	date +%s >"$UPDATE_MARKER" 2>/dev/null || echo 0 >"$UPDATE_MARKER"
+	grace="$(safe_num "$(uci_get rollback_grace_seconds 30)" 30)"
+
+	ok "агент обновлён, бэкап сохранён в: $OWRT_REMOTE_BAK"
+	ok "перезапускаю сервис; heartbeat-loop сам проверит туннель в течение ${grace}с и откатит бинарник, если тот не поднимется"
+	/etc/init.d/owrt-remote restart
+}
+
 heartbeat_loop() {
 	local interval
 	interval="$(safe_num "$(uci_get heartbeat_interval 30)" 30)"
 	[ "$interval" -lt 10 ] && interval=10
 	while :; do
 		send_heartbeat >/dev/null 2>&1 || true
+		self_heal_check
 		sleep "$interval"
 	done
 }
@@ -989,6 +1193,19 @@ case "$cmd" in
 		;;
 	heartbeat-loop)
 		heartbeat_loop
+		;;
+	update)
+		update_agent "$@"
+		;;
+	rollback)
+		rollback_agent "ручной откат по команде оператора"
+		;;
+	tunnel-check)
+		if tunnel_established; then
+			ok "туннель к vps_host:vps_port — ESTABLISHED"
+		else
+			die "туннель не поднят (нет ESTABLISHED TCP-сессии к vps_host:vps_port)"
+		fi
 		;;
 	*)
 		usage >&2

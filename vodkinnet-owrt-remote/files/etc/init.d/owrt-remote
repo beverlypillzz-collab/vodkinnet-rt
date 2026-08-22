@@ -23,35 +23,6 @@ config_enabled() {
 	esac
 }
 
-xray_pids() {
-	local config cmdline cmd pid
-	config="$(uci_get xray_config /etc/xray/owrt-remote-client.json)"
-	[ -n "$config" ] || return 0
-	for cmdline in /proc/[0-9]*/cmdline; do
-		[ -r "$cmdline" ] || continue
-		cmd="$(tr '\000' ' ' <"$cmdline" 2>/dev/null || true)"
-		case "$cmd" in
-			*xray*"$config"*|*xray-core*"$config"*)
-				pid="${cmdline%/cmdline}"
-				pid="${pid##*/}"
-				printf '%s\n' "$pid"
-				;;
-		esac
-	done
-}
-
-stop_xray_processes() {
-	local pids pid
-	pids="$(xray_pids)"
-	for pid in $pids; do
-		kill "$pid" >/dev/null 2>&1 || true
-	done
-	sleep 1
-	for pid in $pids; do
-		kill -0 "$pid" >/dev/null 2>&1 && kill -9 "$pid" >/dev/null 2>&1 || true
-	done
-}
-
 start_service() {
 	mkdir -p /var/lock /var/run /tmp/owrt-xray
 
@@ -80,9 +51,20 @@ reload_service() {
 	start
 }
 
-stop_service() {
-	stop_xray_processes
-}
+# VodkinNET: НЕ переопределяем stop_service() под USE_PROCD=1.
+# procd_open_instance() в start_service() регистрирует ОБА инстанса (xray,
+# heartbeat) и procd сам знает точный PID каждого форкнутого им процесса —
+# штатный stop() из /etc/rc.common корректно останавливает оба.
+# Баг, найденный вживую на канарейке: кастомный stop_service() (удалён
+# отсюда вместе с dead-code хелперами stop_xray_processes/xray_pids,
+# которые он один и вызывал) останавливал ТОЛЬКО xray через ручной скан
+# /proc/*/cmdline. Из-за этого при каждом
+# `/etc/init.d/owrt-remote restart` procd видел, что heartbeat-инстанс
+# "как бы всё ещё жив" (сам он его не останавливал) и не перезапускал —
+# новый код в /usr/sbin/owrt-remote (в т.ч. self_heal_check в
+# heartbeat_loop) при этом на диске уже стоял, но никогда не подхватывался
+# в память работающего процесса. Итог: rollback-логика физически не
+# исполнялась после `update`, хотя маркер и .bak создавались верно.
 
 service_triggers() {
 	procd_add_reload_trigger owrtremote
