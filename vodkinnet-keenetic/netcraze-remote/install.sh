@@ -164,7 +164,7 @@ if ! grep -q "netcraze-remote-watchdog" /opt/etc/crontabs/root 2>/dev/null; then
 	ok "netcraze-remote-watchdog добавлен в cron (проверка раз в минуту)."
 fi
 
-CRON_INITD="$(ls /opt/etc/init.d/S*cron* 2>/dev/null | head -n1 || true)"
+CRON_INITD="$(find /opt/etc/init.d -maxdepth 1 -name 'S*cron*' 2>/dev/null | head -n1 || true)"
 if [ -n "$CRON_INITD" ] && [ -x "$CRON_INITD" ]; then
 	"$CRON_INITD" restart >/dev/null 2>&1 || "$CRON_INITD" start >/dev/null 2>&1 || true
 else

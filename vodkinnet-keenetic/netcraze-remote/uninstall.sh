@@ -13,7 +13,7 @@ ok() { printf '%b[+]%b %s\n' "$C_GREEN" "$C_NC" "$*"; }
 # и молча логировать ошибку каждую минуту.
 if [ -f /opt/etc/crontabs/root ] && grep -q "netcraze-remote-watchdog" /opt/etc/crontabs/root 2>/dev/null; then
 	sed -i '/netcraze-remote-watchdog/d' /opt/etc/crontabs/root
-	CRON_INITD="$(ls /opt/etc/init.d/S*cron* 2>/dev/null | head -n1 || true)"
+	CRON_INITD="$(find /opt/etc/init.d -maxdepth 1 -name 'S*cron*' 2>/dev/null | head -n1 || true)"
 	[ -n "$CRON_INITD" ] && [ -x "$CRON_INITD" ] && "$CRON_INITD" restart >/dev/null 2>&1 || true
 fi
 
