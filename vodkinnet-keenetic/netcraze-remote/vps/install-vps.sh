@@ -20,10 +20,26 @@ STATE_DIR="/var/lib/netcraze-remote"
 ENV_FILE="/etc/netcraze-remote/hub.env"
 SVC_USER="netcraze-remote"
 
-C_GREEN='\033[0;32m'; C_YELLOW='\033[1;33m'; C_RED='\033[0;31m'; C_NC='\033[0m'
+C_GREEN='\033[0;32m'; C_YELLOW='\033[1;33m'; C_RED='\033[0;31m'; C_CYAN='\033[0;36m'; C_NC='\033[0m'
 ok()   { printf '%b[+]%b %s\n' "$C_GREEN" "$C_NC" "$*"; }
 info() { printf '%b[i]%b %s\n' "$C_YELLOW" "$C_NC" "$*"; }
 err()  { printf '%b[!!]%b %s\n' "$C_RED" "$C_NC" "$*" >&2; }
+
+# VodkinNET: тот же баннер, что и у vodkinnet-owrt-remote и у самого агента
+# netcraze-remote — единый вид установки для всего флота, независимо от того,
+# что именно ставится (агент на роутере или панель на VPS).
+vodkin_banner() {
+	printf '\n'
+	printf '%b\n' "${C_CYAN}  ██╗   ██╗ ██████╗ ██████╗ ██╗  ██╗██╗███╗   ██╗${C_NC}"
+	printf '%b\n' "${C_CYAN}  ██║   ██║██╔═══██╗██╔══██╗██║ ██╔╝██║████╗  ██║${C_NC}"
+	printf '%b\n' "${C_CYAN}  ██║   ██║██║   ██║██║  ██║█████╔╝ ██║██╔██╗ ██║${C_NC}"
+	printf '%b\n' "${C_CYAN}  ╚██╗ ██╔╝██║   ██║██║  ██║██╔═██╗ ██║██║╚██╗██║${C_NC}"
+	printf '%b\n' "${C_CYAN}   ╚████╔╝ ╚██████╔╝██████╔╝██║  ██╗██║██║ ╚████║${C_NC}"
+	printf '%b\n' "${C_CYAN}    ╚═══╝   ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝${C_NC}"
+	printf '  %s\n' "${1:-Keenetic/Entware Hub installer}"
+	printf '  beverlypillzz-collab/vodkinnet-rt\n\n'
+}
+vodkin_banner "netcraze-remote Hub installer (VPS)"
 
 # VodkinNET: raw.githubusercontent.com (Fastly) кэширует по эджам, привязанным
 # к сети запроса — при curl|sh с VPS можно словить другой, более старый эдж,
