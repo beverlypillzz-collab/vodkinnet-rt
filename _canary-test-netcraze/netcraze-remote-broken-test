@@ -1038,8 +1038,19 @@ case "$cmd" in
 	render-client) render_client_config "$@" ;;
 	run) render_client_config >/dev/null; start_xray; start_heartbeat ;;
 	start) start_xray; start_heartbeat ;;
-	stop) stop_xray; stop_heartbeat ;;
-	restart) stop_xray; stop_heartbeat; sleep 1; start_xray; start_heartbeat ;;
+	# VodkinNET: живой баг, найденный на реальной канарейке (Netcraze GIGA,
+	# 2026-08-23). stop_xray рвёт реверс-туннель — если сама команда
+	# запущена ЧЕРЕЗ этот же туннель (SSH внутри VLESS), управляющий
+	# терминал получает SIGHUP в момент обрыва, и весь текущий процесс
+	# (вместе с ещё не выполненными stop_heartbeat/start_xray/
+	# start_heartbeat) может быть убит на середине последовательности —
+	# непредсказуемо, по гонке: иногда успевает домотать до конца, иногда
+	# нет. Итог вживую: heartbeat-loop годами не перезапускался, несмотря
+	# на многократные restart/update. (trap '' HUP; ...) — тот же приём,
+	# что уже используется в bg_run() для heartbeat-процесса — делает всю
+	# последовательность невосприимчивой к обрыву управляющей сессии.
+	stop) (trap '' HUP; stop_xray; stop_heartbeat) ;;
+	restart) (trap '' HUP; stop_xray; stop_heartbeat; sleep 1; start_xray; start_heartbeat) ;;
 	heartbeat) send_heartbeat ;;
 	heartbeat-loop) heartbeat_loop ;;
 	pull-config) pull_config ;;
