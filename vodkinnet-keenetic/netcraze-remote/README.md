@@ -174,6 +174,40 @@ curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/
 5. `/opt/etc/init.d/S99netcraze-remote start`
 6. `netcraze-remote doctor` — диагностика.
 
+### Обновление агента
+
+Тот же `install.sh` ставит агент с нуля и обновляет уже развёрнутый —
+сам определяет, что перед ним, по наличию текущего `/opt/sbin/netcraze-remote`.
+Повторный запуск той же команды из шага 2: проверяет синтаксис (`sh -n`)
+до установки, бэкапит агент и init-скрипт (`.bak`), ставит новые версии
+атомарно, и подключает self-heal — если после апдейта туннель не
+поднимется за `ROLLBACK_GRACE_SECONDS` (в конфиге, по умолчанию 30с),
+агент откатится сам. Плюс независимый `netcraze-remote-watchdog` на
+cron — откатывает даже если сам агент настолько сломан, что не может
+себя спасти (install.sh ставит его и настраивает cron автоматически).
+
+Точечное обновление и ручной rollback:
+
+```sh
+netcraze-remote update /path/to/new/netcraze-remote
+netcraze-remote rollback
+netcraze-remote tunnel-check
+```
+
+Проверка cron-задачи watchdog:
+
+```sh
+grep netcraze-remote-watchdog /opt/etc/crontabs/root
+ps w | grep '[c]rond'
+/opt/sbin/netcraze-remote-watchdog; echo "код выхода: $?"
+```
+
+> ⚠️ Cron-инфраструктура Entware (пакет, путь crontab, имя init-скрипта)
+> здесь протестирована статически и в песочнице, но **не на живом
+> Keenetic-устройстве** — в отличие от аналогичного механизма в
+> `vodkinnet-owrt-remote`, где всё проверено вживую на канарейке. Первый
+> реальный прогон стоит сделать на некритичном роутере.
+
 ## Удаление
 
 ### Роутер (Keenetic/KNDMS)
@@ -187,7 +221,8 @@ curl -fsSL -o uninstall.sh "https://raw.githubusercontent.com/beverlypillzz-coll
 sh uninstall.sh
 ```
 
-По умолчанию останавливает агент, удаляет бинарь/init-скрипт/логи, но
+По умолчанию останавливает агент, снимает watchdog с cron, удаляет
+бинарь/init-скрипт/`.bak`-копии/watchdog/логи/маркер отката, но
 **оставляет** `/opt/etc/netcraze-remote/netcraze-remote.conf` (там
 секреты — UUID/токены). Чтобы удалить и конфиг тоже:
 
@@ -237,6 +272,10 @@ REMOVE_USER=1 sudo sh uninstall-vps.sh    # + удалить системног�
 | Keenetic | `netcraze-remote status` | статус агента + список сервисов |
 | Keenetic | `netcraze-remote doctor` | диагностика (entware/xray/heartbeat/сервисы) |
 | Keenetic | `netcraze-remote pull-config` | перетянуть актуальный конфиг с Hub целиком |
+| Keenetic | `netcraze-remote update /path/to/new` | обновить агент с бэкапом и авто-rollback |
+| Keenetic | `netcraze-remote rollback` | немедленный ручной откат на .bak |
+| Keenetic | `netcraze-remote tunnel-check` | реальная проверка ESTABLISHED-туннеля |
+| Keenetic | `cat /opt/var/log/netcraze-remote-rollback.log` | история автооткатов (agent + watchdog) |
 | VPS | `systemctl status netcraze-remote-hub` | статус панели |
 | VPS | `systemctl status netcraze-remote-xray` | статус reverse-туннеля |
 | VPS | `curl -sS http://127.0.0.1:8099/health` | healthcheck панели |
@@ -784,3 +823,42 @@ automated-сканеров), а всё остальное продолжало �
 через `/СЕКРЕТНЫЙ_ПУТЬ/` — не ломая внутреннюю навигацию приложения
 (оно генерирует абсолютные пути вида `/api/...`, которые не знают про
 префикс). Итоговый URL с секретным путём показывается в конце установки.
+
+### 2026-08-23 — перенесён rollback/watchdog-механизм из owrt-remote
+
+Полный порт механизма, разработанного и проверенного вживую на
+канарейке OpenWrt-роутера (см. changelog `vodkinnet-owrt-remote`),
+адаптированный под Entware (свой формат конфига через `conf_get`, нет
+`uci`/`procd`):
+
+- `tunnel_established()` — реальная проверка ESTABLISHED TCP-сессии к
+  `VPS_HOST:VPS_PORT` через `/proc/net/tcp`, вместо "процесс запущен = ок".
+- `netcraze-remote update <path>` — бэкап текущего бинарника, `sh -n`
+  до установки, атомарная замена (`mv`, не `cp` поверх себя — тот же
+  self-overwrite баг, что уронил сервис в оригинальном owrt-remote,
+  здесь исправлен сразу, а не найден заново вживую).
+- `netcraze-remote-watchdog` — независимый файл на cron, не исполняет
+  код агента. Здесь особенно важен: в отличие от owrt-remote (procd
+  с respawn), у netcraze-remote **нет вообще никакого supervisor'а**
+  для процесса `heartbeat-loop` самого по себе — если он упадёт целиком
+  (не xray, а сам процесс), поднять некому до перезагрузки. Watchdog
+  закрывает и этот пробел, не только post-update rollback.
+- `install.sh` — теперь одновременно install- и update-скрипт: та же
+  проверка синтаксиса, бэкап агента и init-скрипта, автоустановка
+  watchdog + cron (`opkg install cron`, если не стоит; init-скрипт
+  cron находится динамически через glob, номер не хардкодится).
+- `uninstall.sh` — убирает watchdog, `.bak`-файлы, cron-запись, маркер
+  и лог отката (всегда, не только при `PURGE=1` — эти файлы не содержат
+  секретов).
+
+Все три сценария install-логики (первая установка / апдейт с бэкапом /
+битый синтаксис не ломает текущую установку) и rollback-логика
+watchdog (откат при мёртвом туннеле / отсутствие отката при живом)
+проверены в изолированной песочнице на реальных TCP-сокетах.
+
+**Не проверено вживую**: в отличие от `vodkinnet-owrt-remote`, где весь
+цикл (включая живой инцидент и его исправление) отработан на реальной
+канарейке, для этой ветки живого Keenetic-устройства в сессии не было.
+Требует проверки на некритичном роутере перед накаткой на боевой флот
+— в частности, реальное наличие/имя cron-пакета и путь crontab на
+конкретной сборке Entware.

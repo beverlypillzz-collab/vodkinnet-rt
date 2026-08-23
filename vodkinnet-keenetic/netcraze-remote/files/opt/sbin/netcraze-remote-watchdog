@@ -1,0 +1,126 @@
+#!/bin/sh
+# VodkinNET: netcraze-remote-watchdog — перенесено из owrt-remote-watchdog
+# (см. changelog vodkinnet-owrt-remote за 2026-08-23: живой инцидент, где
+# rollback-логика ВНУТРИ обновляемого агента не смогла откатиться сама
+# из-за self-overwrite бага, и спас только полностью независимый watchdog).
+#
+# Этот файл ПОЛНОСТЬЮ ОТДЕЛЬНЫЙ от /opt/sbin/netcraze-remote. update_agent()
+# внутри netcraze-remote никогда его не трогает и не знает о нём. Не читает
+# и не исполняет ничего из основного агента — только свои встроенные проверки
+# ниже. Если update поставил версию, которая не может даже подняться
+# (синтаксическая ошибка, heartbeat-loop падает при старте) — это никак не
+# влияет на watchdog.
+#
+# Запускается через cron (Entware), не как процесс, которым управляет сам
+# netcraze-remote — именно потому, что если сам агент (xray + heartbeat-loop)
+# упадёт целиком, поднимать его больше некому: в отличие от owrt-remote
+# (procd с respawn) здесь НЕТ вообще никакого supervisor'а для процесса
+# heartbeat-loop самого по себе (только heartbeat-loop, пока жив, чинит
+# xray под собой — но не наоборот). cron тикает независимо от состояния
+# агента.
+#
+# Установка (один раз, делает install.sh):
+#   opkg install cron (если ещё не стоит)
+#   echo "* * * * * /opt/sbin/netcraze-remote-watchdog" >> /opt/etc/crontabs/root
+#   /opt/etc/init.d/S*cron* restart (или enable, смотря по пакету)
+
+CONF="/opt/etc/netcraze-remote/netcraze-remote.conf"
+BIN="/opt/sbin/netcraze-remote"
+BAK="${BIN}.bak"
+MARKER="/opt/etc/netcraze-remote/update-pending"
+LOG="/opt/var/log/netcraze-remote-rollback.log"
+
+# Нет маркера обновления — обновления не было (или уже разобрались).
+[ -f "$MARKER" ] || exit 0
+
+# VodkinNET: своя копия conf_get, НЕ вызов из основного агента — watchdog
+# не должен зависеть ни от чего внешнего, включая код агента, который он
+# же и откатывает, если тот битый.
+conf_get() {
+	local key="$1" default="$2" val
+	[ -f "$CONF" ] || { printf '%s' "$default"; return; }
+	val="$(sed -n "s/^${key}=\"\{0,1\}\([^\"]*\)\"\{0,1\}[[:space:]]*\$/\1/p" "$CONF" | tail -n1)"
+	if [ -n "$val" ]; then printf '%s' "$val"; else printf '%s' "$default"; fi
+}
+
+marker_ts="$(cat "$MARKER" 2>/dev/null)"
+case "$marker_ts" in
+	''|*[!0-9]*)
+		rm -f "$MARKER"
+		exit 0
+		;;
+esac
+
+now="$(date +%s 2>/dev/null || echo 0)"
+elapsed=$((now - marker_ts))
+
+grace="$(conf_get ROLLBACK_GRACE_SECONDS 30)"
+case "$grace" in ''|*[!0-9]*) grace=30 ;; esac
+
+vps_host="$(conf_get VPS_HOST '')"
+vps_port="$(conf_get VPS_PORT 8444)"
+case "$vps_port" in ''|*[!0-9]*) vps_port=8444 ;; esac
+
+is_ipv4_literal() {
+	case "$1" in
+		''|*[!0-9.]*) return 1 ;;
+	esac
+	case "$1" in
+		*.*.*.*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+tunnel_up() {
+	[ -n "$vps_host" ] || return 1
+	[ -r /proc/net/tcp ] || return 1
+
+	local hex_port a b c d hex_ip pattern found
+	hex_port="$(printf '%04X' "$vps_port")"
+
+	if is_ipv4_literal "$vps_host"; then
+		IFS=. read -r a b c d <<-EOF_VPSIP
+$vps_host
+EOF_VPSIP
+		hex_ip="$(printf '%02X%02X%02X%02X' "$d" "$c" "$b" "$a")"
+		pattern="${hex_ip}:${hex_port}"
+		found="$(awk -v p="$pattern" '$4=="01" && $3==p {print "1"; exit}' /proc/net/tcp)"
+	else
+		pattern=":${hex_port}"
+		found="$(awk -v p="$pattern" -v plen="${#pattern}" \
+			'$4=="01" { if (substr($3, length($3)-plen+1) == p) { print "1"; exit } }' \
+			/proc/net/tcp)"
+	fi
+
+	[ "$found" = "1" ]
+}
+
+if tunnel_up; then
+	rm -f "$MARKER"
+	exit 0
+fi
+
+[ "$elapsed" -ge "$grace" ] || exit 0
+
+if [ ! -x "$BAK" ]; then
+	logger -t netcraze-remote-watchdog "rollback needed but $BAK missing or not executable" 2>/dev/null
+	rm -f "$MARKER"
+	exit 1
+fi
+
+tmp="${BIN}.watchdog.$$"
+if cp "$BAK" "$tmp" 2>/dev/null && chmod +x "$tmp" 2>/dev/null; then
+	mv "$tmp" "$BIN"
+else
+	rm -f "$tmp"
+	logger -t netcraze-remote-watchdog "rollback failed: could not prepare temp copy from $BAK" 2>/dev/null
+	exit 1
+fi
+
+rm -f "$MARKER"
+mkdir -p "$(dirname "$LOG")" 2>/dev/null
+printf '%s watchdog: откат выполнен (туннель не поднялся за %sс, прошло %sс)\n' \
+	"$(date '+%F %T' 2>/dev/null || echo '?')" "$grace" "$elapsed" >>"$LOG" 2>/dev/null
+logger -t netcraze-remote-watchdog "rollback executed: tunnel down after ${elapsed}s (grace ${grace}s), restored $BAK" 2>/dev/null
+
+( "$BIN" restart >/dev/null 2>&1 & )
