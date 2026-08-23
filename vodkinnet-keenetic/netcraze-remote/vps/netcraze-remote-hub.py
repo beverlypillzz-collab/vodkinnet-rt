@@ -1042,6 +1042,26 @@ def connect(db_path=DB_PATH):
     ensure_state()
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
+    # VodkinNET: та же уязвимость, что была найдена и исправлена в
+    # owrt-remote-hub.py (PR #1, 2026-07-22) — sqlite3.connect() создаёт
+    # файл БД с правами по умолчанию (обычно 0644, читаемо любым локальным
+    # пользователем на VPS), в то время как остальные чувствительные файлы
+    # в этом модуле (AUTH_FILE/SESSION_TOKEN_FILE/VAPID-ключи) уже 0600.
+    # При переносе owrt-remote-hub.py в netcraze-remote-hub.py этот фикс
+    # не попал — найдено при финальном security-аудите 2026-08-23.
+    try:
+        os.chmod(db_path, 0o600)
+    except OSError:
+        pass
+    # sqlite in WAL mode leaves -wal/-shm sidecars that can also hold live
+    # rows; lock those down too, not just the main db file.
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = Path(str(db_path) + suffix)
+        if sidecar.exists():
+            try:
+                os.chmod(sidecar, 0o600)
+            except OSError:
+                pass
     return conn
 
 
