@@ -2043,7 +2043,7 @@ input,select{{min-width:0;border:1px solid var(--line);border-radius:8px;padding
     <input name="id" placeholder="router id: node-2" autocomplete="off" required>
     <input name="name" placeholder="Название роутера" required>
     <select name="role"><option value="node">node</option><option value="main">main</option></select>
-    <input name="entry_port" placeholder="28080" inputmode="numeric" required>
+    <input name="ssh_entry_port" placeholder="29080" inputmode="numeric" required>
     <input name="vps_host" placeholder="VPS IP/domain" required>
     <button class="primary">Добавить</button>
   </form>
@@ -2184,7 +2184,7 @@ function render(list) {{
       r.entry_port ? 'entry ' + r.entry_port : '',
       r.ssh_entry_port ? 'ssh ' + r.ssh_entry_port : '',
       r.reverse_tag || '',
-      (r.admin_host ? (r.admin_host + ':' + (r.admin_port || 80)) : 'admin: авто (LAN IP)')
+      r.entry_port ? (r.admin_host ? (r.admin_host + ':' + (r.admin_port || 80)) : 'admin: авто (LAN IP)') : ''
     ].filter(Boolean).slice(0, 5);
     const tagHtml = tags.map(t => `<span class="tag">${{escapeHtml(t)}}</span>`).join('');
     const sshReady = online && ssh === 'running' && Number(r.ssh_entry_port || 0) > 0;
@@ -2291,7 +2291,7 @@ cards.addEventListener('drop', async (ev) => {{
   dragSrcId = null;
 }});
 
-function nextEntryPort(list) {{
+function nextSshEntryPort(list) {{
   const used = new Set();
   list.forEach(r => {{
     const entry = Number(r.entry_port || 0);
@@ -2304,8 +2304,17 @@ function nextEntryPort(list) {{
   // друг о друге БД на одном VPS, коллизия уже реально случалась на
   // практике и приводила к тому, что клик в одной панели вёл на
   // совершенно другой роутер в другой панели.
-  let port = 28080;
-  while (used.has(port) || used.has(port + 1000)) port += 10;
+  //
+  // VodkinNET 2026-08-23: веб-морда (entry_port) убрана из формы навсегда
+  // — панель этого флота работает SSH-only. Раньше ssh-порт всегда
+  // выводился как entry_port+1000 и отдельного поля не было вообще; тем,
+  // у кого физически нет рабочей веб-морды NDMS (частый случай), форма
+  // требовала ввести entry_port ради несуществующего канала. Теперь
+  // ssh_entry_port — независимое поле, entry_port через панель больше не
+  // создаётся (см. render_router_conf: при entry_port=0 ADMIN_HOST/PORT
+  // корректно уходят пустыми, агент не строит admin-outbound вообще).
+  let port = 29080;
+  while (used.has(port)) port += 10;
   return port;
 }}
 
@@ -2355,7 +2364,7 @@ function fillRouterForm(force = false) {{
   const id = nextRouterId(list);
   if (force || !routerForm.id.value) routerForm.id.value = id;
   if (force || !routerForm.name.value) routerForm.name.value = defaultRouterName(routerForm.id.value || id);
-  if (force || !routerForm.entry_port.value) routerForm.entry_port.value = String(nextEntryPort(list));
+  if (force || !routerForm.ssh_entry_port.value) routerForm.ssh_entry_port.value = String(nextSshEntryPort(list));
   if (force || !routerForm.vps_host.value) routerForm.vps_host.value = defaultVpsHost(list);
   if (force || !routerForm.role.value) routerForm.role.value = id === 'main' ? 'main' : 'node';
 }}
@@ -2429,23 +2438,16 @@ routerForm.addEventListener('submit', async (ev) => {{
   routerMsg.hidden = true;
   const body = new URLSearchParams(new FormData(ev.currentTarget));
   const id = String(body.get('id') || '').trim();
-  const entryPort = Number(body.get('entry_port') || 0);
-  const sshEntryPort = entryPort + 1000;
+  const sshEntryPort = Number(body.get('ssh_entry_port') || 0);
   const duplicateId = (window.ROUTERS || []).find(r => String(r.id) === id);
-  const duplicatePort = (window.ROUTERS || []).find(r => Number(r.entry_port || 0) === entryPort || Number(r.ssh_entry_port || 0) === entryPort);
   const duplicateSshPort = (window.ROUTERS || []).find(r => Number(r.entry_port || 0) === sshEntryPort || Number(r.ssh_entry_port || 0) === sshEntryPort);
   if (duplicateId) {{
     showRouterMsg(`Router ID "${{id}}" уже есть. Для второго роутера оставь предложенный ID или напиши новый.`, true);
     return;
   }}
-  if (duplicatePort) {{
-    showRouterMsg(`Порт ${{entryPort}} уже занят роутером "${{duplicatePort.id}}". Поставь следующий свободный порт.`, true);
-    routerForm.entry_port.value = String(nextEntryPort(window.ROUTERS || []));
-    return;
-  }}
   if (duplicateSshPort) {{
-    showRouterMsg(`SSH-порт ${{sshEntryPort}} уже занят роутером "${{duplicateSshPort.id}}". Поставь другой entry port.`, true);
-    routerForm.entry_port.value = String(nextEntryPort(window.ROUTERS || []));
+    showRouterMsg(`SSH-порт ${{sshEntryPort}} уже занят роутером "${{duplicateSshPort.id}}". Поставь другой SSH-порт.`, true);
+    routerForm.ssh_entry_port.value = String(nextSshEntryPort(window.ROUTERS || []));
     return;
   }}
   const res = await fetch('/api/router', {{method: 'POST', body}});
