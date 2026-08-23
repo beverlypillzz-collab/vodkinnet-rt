@@ -388,6 +388,9 @@ print_result() {
 	info "Вход:"
 	info "  login:    $HUB_LOGIN"
 	info "  password: $HUB_PASSWORD"
+	if [ "${HUB_PASSWORD_GENERATED:-0}" = "1" ]; then
+		info "  (пароль сгенерирован автоматически — сохрани его, показывается один раз)"
+	fi
 	info ""
 	info "Проверка на VPS:"
 	info "  sudo systemctl status owrt-remote --no-pager -l"
