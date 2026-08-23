@@ -452,3 +452,19 @@ info "LuCI:   Службы -> OpenWrt Remote"
 info "Панель: http://$ip/cgi-bin/owrt-remote?key=$key"
 info "CLI:    owrt-remote doctor"
 info "Xray:   если пишет 'нет Xray', нажми в панели 'Поставить Xray в /tmp' или выполни: owrt-remote install-xray-tmp"
+
+cat <<'EOF'
+
+Дальше (регистрация в Hub на VPS для удалённого доступа):
+  1. В панели Hub -> "+ Добавить роутер": id, название, роль, VPS-хост,
+     ENTRY PORT (свободный порт на этом VPS — панель подскажет, если
+     порт уже занят другим роутером).
+  2. Нажми "Обновить Xray CFG", затем "Рестарт Xray VPS" (это НЕ
+     происходит автоматически при добавлении роутера — нужно руками
+     после каждого изменения списка роутеров).
+  3. Открой "Конфиг" в карточке роутера -> вставь текст целиком в
+     /etc/config/owrtremote на этом роутере.
+  4. /etc/init.d/owrt-remote restart
+  5. owrt-remote doctor
+
+EOF

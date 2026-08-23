@@ -7,10 +7,31 @@ set -eu
 
 REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote}"
 
-C_RED='\033[0;31m'; C_GREEN='\033[0;32m'; C_YELLOW='\033[1;33m'; C_NC='\033[0m'
+if [ -t 1 ]; then
+	C_RED='\033[0;31m'; C_GREEN='\033[0;32m'; C_YELLOW='\033[1;33m'; C_CYAN='\033[0;36m'; C_NC='\033[0m'
+else
+	C_RED=''; C_GREEN=''; C_YELLOW=''; C_CYAN=''; C_NC=''
+fi
+
+# VodkinNET: тот же баннер, что и у vodkinnet-owrt-remote — единый вид
+# установки для всего флота, независимо от ОС под капотом.
+vodkin_banner() {
+	printf '\n'
+	printf '%b\n' "${C_CYAN}  ██╗   ██╗ ██████╗ ██████╗ ██╗  ██╗██╗███╗   ██╗${C_NC}"
+	printf '%b\n' "${C_CYAN}  ██║   ██║██╔═══██╗██╔══██╗██║ ██╔╝██║████╗  ██║${C_NC}"
+	printf '%b\n' "${C_CYAN}  ██║   ██║██║   ██║██║  ██║█████╔╝ ██║██╔██╗ ██║${C_NC}"
+	printf '%b\n' "${C_CYAN}  ╚██╗ ██╔╝██║   ██║██║  ██║██╔═██╗ ██║██║╚██╗██║${C_NC}"
+	printf '%b\n' "${C_CYAN}   ╚████╔╝ ╚██████╔╝██████╔╝██║  ██╗██║██║ ╚████║${C_NC}"
+	printf '%b\n' "${C_CYAN}    ╚═══╝   ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝${C_NC}"
+	printf '  %s\n' "${1:-Keenetic/Entware agent installer}"
+	printf '  beverlypillzz-collab/vodkinnet-rt\n\n'
+}
+
 ok()   { printf '%b[+]%b %s\n' "$C_GREEN" "$C_NC" "$*"; }
 info() { printf '%b[i]%b %s\n' "$C_YELLOW" "$C_NC" "$*"; }
 die()  { printf '%b[!!] ОШИБКА:%b %s\n' "$C_RED" "$C_NC" "$*" >&2; exit 1; }
+
+vodkin_banner "Keenetic/Entware agent installer"
 
 # --- 1. проверка Entware (ФУНКЦИОНАЛЬНАЯ, не просто "opkg есть в PATH") ---
 # VodkinNET: на KNDMS документирован баг, когда Entware "числится" включённым

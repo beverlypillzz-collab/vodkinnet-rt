@@ -1,1132 +1,128 @@
-<div align="center">
+# owrt-remote
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0a0603,45:e01e1e,100:ff6a00&height=210&section=header&text=VodkinNet%20RT%20Hub&fontSize=42&fontColor=fff2e8&animation=fadeIn&fontAlignY=36&desc=Remote%20LuCI%20%2B%20SSH%20access%20through%20your%20own%20VPS%2C%20TLS-encrypted&descAlignY=58&descSize=16" alt="VodkinNet RT Hub" width="100%" />
+Удалённый доступ к OpenWrt-роутерам (Cudy и т.п.) через свой VPS —
+реверс-туннель, без проброса портов, работает даже за CGNAT.
 
-<p>
-  <a href="#-быстрый-старт"><img alt="Quick start" src="https://img.shields.io/badge/QUICK%20START-ONE%20COMMAND-22C55E?style=for-the-badge&labelColor=0a0603"></a>
-  <a href="#-схема-работы"><img alt="Reverse access" src="https://img.shields.io/badge/REVERSE-ACCESS-e01e1e?style=for-the-badge&labelColor=0a0603"></a>
-  <a href="#vodkinnet-tls-на-reverse-канале"><img alt="TLS" src="https://img.shields.io/badge/REVERSE-TLS-ff6a00?style=for-the-badge&labelColor=0a0603"></a>
-  <a href="#-частые-проблемы"><img alt="Troubleshooting" src="https://img.shields.io/badge/TROUBLESHOOTING-READY-ff9a3c?style=for-the-badge&labelColor=0a0603"></a>
-</p>
+Часть семьи `vodkinnet-rt` — сосед `vodkinnet-keenetic/netcraze-remote`
+(тот же принцип для Keenetic/Entware-флота) на одном VPS `panel-vodkinnet`.
 
-<p>
-  <img alt="OpenWrt" src="https://img.shields.io/badge/OpenWrt-21.02%20%2F%2025.12-ff6a00?style=flat-square&logo=openwrt&logoColor=white">
-  <img alt="LuCI" src="https://img.shields.io/badge/LuCI-supported-44CC11?style=flat-square">
-  <img alt="VPS" src="https://img.shields.io/badge/VPS-hub-e01e1e?style=flat-square">
-  <img alt="Xray" src="https://img.shields.io/badge/Xray-reverse%20%2B%20TLS-ff6a00?style=flat-square">
-  <img alt="Nginx" src="https://img.shields.io/badge/Nginx-HTTPS-22C55E?style=flat-square&logo=nginx&logoColor=white">
-  <img alt="License" src="https://img.shields.io/badge/License-MIT-22C55E?style=flat-square">
-</p>
-
-<h3>Удалённый доступ к флоту OpenWrt-роутеров через свой VPS</h3>
-
-<p>
-  Карточки роутеров · Online/Offline · LuCI · SSH Web Terminal · Xray Reverse (TLS) · HTTPS через nginx
-</p>
-
-<p><sub>Форк <a href="https://github.com/kzolotarev95/luci-app-owrt-remote">kzolotarev95/luci-app-owrt-remote</a> (MIT), адаптированный VodkinNET: TLS на reverse-канале, без дефолтного пароля, без публичного raw-порта, безопасное продление сертификата.</sub></p>
-
-</div>
-
----
-
-<div align="center">
-
-<h2> Что это такое</h2>
-
-<p>
-<b>VodkinNet RT Hub</b> — это связка из VPS-панели и OpenWrt-агента, которая даёт удобный удалённый доступ к роутерам без проброса LuCI и SSH наружу.<br>
-Роутер сам подключается к VPS изнутри сети, а ты заходишь в Hub-панель и открываешь нужный роутер, LuCI или SSH Web Terminal.
-</p>
-
-<table>
-<tr>
-<td width="50%" align="center">
-
-<h3> Для чего</h3>
-
-удалённо открыть LuCI  
-зайти в SSH через браузер  
-видеть Online/Offline роутеров  
-держать всё за HTTPS  
-не светить домашнюю сеть наружу
-
-</td>
-<td width="50%" align="center">
-
-<h3> Из чего состоит</h3>
-
-VPS Hub-панель  
-OpenWrt агент  
-Xray reverse-туннели  
-nginx HTTPS proxy  
-firewall automation  
-web terminal
-
-</td>
-</tr>
-</table>
-
-</div>
-
-<a name="vodkinnet-tls-на-reverse-канале"></a>
-## Что изменено VodkinNET относительно оригинала
-
-Оригинальный проект отправлял reverse-канал (роутер ↔ VPS) с `security: none` —
-VLESS-UUID и весь управляющий трафик шли открытым текстом. Для флота роутеров
-за DPI/whitelist-режимом оператора это и палевно, и небезопасно. Изменения:
-
-- **TLS на reverse-канале** (порт `8443` по умолчанию) — сертификат от Let's
-  Encrypt, обычный `security: tls`, без Reality (канал служебный, не для
-  обхода блокировок — Reality была бы избыточна и тяжелее для CPU роутера).
-- **Нет дефолтного пароля `admin/admin`** — если `HUB_PASSWORD` не задан,
-  инсталлятор генерирует случайный 24-символьный пароль и печатает его один раз.
-- **Raw-порт (8088) не публикуется наружу** — форсится на `127.0.0.1`
-  независимо от `--host`; наружу торчит только nginx на 443. Аварийный клапан
-  `OWRT_REMOTE_RAW_PUBLIC=1`, если нужно поведение оригинала.
-- **Безопасное продление сертификата** — `certbot renew` меняет права на серт
-  на дефолтные и ничего не перезапускает. Установщик ставит deploy-hook,
-  который восстанавливает права группы `ssl-cert` и рестартит
-  `owrt-remote-xray` **только для своего домена**, не трогая другие серты на
-  том же сервере (например, соседнюю VPN-панель).
-- Никаких реальных доменов/IP в коде — всё через переменные окружения при
-  установке (см. ниже).
-
-### Установка с TLS на reverse-канале
-
-```bash
-# 1. DNS: заведи A-запись на свой домен -> IP этого VPS
-# 2. Выпусти сертификат (certbot, любой ACME-клиент) на этот домен
-# 3. Ставь с переменными окружения:
-
-sudo HUB_DOMAIN=hub.example.com \
-     OWRT_REMOTE_TLS_CERT=/etc/letsencrypt/live/hub.example.com/fullchain.pem \
-     OWRT_REMOTE_TLS_KEY=/etc/letsencrypt/live/hub.example.com/privkey.pem \
-     OWRT_REMOTE_TLS_SNI=hub.example.com \
-     OWRT_REMOTE_VLESS_PORT=8443 \
-     bash vps/install-vps.sh
-```
-
-На роутере (агент) в `/etc/config/owrtremote` укажи тот же домен:
+## Архитектура
 
 ```
-uci set owrtremote.main.tls_sni='hub.example.com'
-uci commit owrtremote
-/etc/init.d/owrt-remote restart
+OpenWrt (за CGNAT)                        VPS
+  procd: xray + heartbeat-loop инстансы      owrt-remote-hub (Python)
+  xray (reverse VLESS, admin+ssh каналы) ←→  owrt-remote-xray (Xray)
+  локальная LuCI-панель (Службы → OpenWrt    nginx → панель Hub
+  Remote)
+  owrt-remote-watchdog (cron)
 ```
 
-Если `tls_sni` не задан — агент подключается как в оригинале, plaintext
-(обратная совместимость со старыми установками).
+- **Модель доступа**: фиксированные admin (LuCI веб-морда) + ssh каналы
+  на роутер. Не произвольный список сервисов.
+- **Reverse-tag** детерминирован (`reverse-{router_id}` /
+  `reverse-{router_id}-ssh`), не хранится отдельной колонкой БД.
+- **Rollback после обновления агента**: `heartbeat-loop` (под `procd`,
+  с автоматическим respawn) сам проверяет живость туннеля после апдейта
+  и откатывает бинарник на `.bak`, если туннель не поднялся за
+  `rollback_grace_seconds` (uci, по умолчанию 30с). Плюс независимый
+  `owrt-remote-watchdog` на cron — откатывает, даже если сам агент
+  настолько сломан, что не может себя спасти.
+- Локальная LuCI-панель на самом роутере — то, чего нет у Keenetic-версии
+  (там нет готового веб-фреймворка на устройстве).
 
-Опционально — брендированная ссылка в шапке панели:
-```bash
-OWRT_REMOTE_BRAND_URL=https://example.com OWRT_REMOTE_BRAND_NAME="MyBrand"
-```
-Без этих переменных бейдж просто не показывается.
-
-### VodkinNET fleet-стандарт: management-демоны на LAN-интерфейсе
-
-На всём флоте VodkinNET dropbear и uhttpd намеренно привязаны к интерфейсу
-`lan` (не к `0.0.0.0`/loopback) — часть стандартной защиты "управление только
-с одного admin IP". Это ломает reverse-туннель по умолчанию (127.0.0.1
-недоступен), поэтому:
-
-- **Агент** (`files/usr/sbin/owrt-remote`) при пустом `admin_host`/`ssh_host`
-  в UCI сам берёт `network.lan.ipaddr` вместо жёсткого `127.0.0.1`. Явное
-  значение в UCI всегда приоритетнее.
-- **Установщик** (`install.sh`) автоматически ставит
-  `uhttpd.main.redirect_https='0'` — форс-редикт LuCI на HTTPS ломает
-  туннельный `freedom`-proxy (получает `307` вместо HTML). Сессия LuCI
-  всё равно защищена TLS самого reverse-канала (VPS↔роутер), локальный
-  редирект для этого пути избыточен. Отключить это поведение установщика:
-  `OWRT_REMOTE_KEEP_HTTPS_REDIRECT=1 sh install.sh`.
-- **VPS-терминал в панели** по умолчанию отдаёт shell от имени того юзера,
-  под которым запущен сам Hub-сервис (обычно root). Задай
-  `OWRT_REMOTE_VPS_SHELL_USER=имя_учётки` в systemd-окружении Hub (тот же
-  drop-in, что и для TLS), чтобы кнопка "Терминал VPS" открывала shell
-  этого пользователя вместо root — что-то привилегированное всё равно
-  потребует явного `sudo`, как в обычной SSH-сессии.
-- **Admin host / SSH host в панели держи пустыми** — на карточке роутера
-  это отображается как `admin: авто (LAN IP)`. Это не заглушка: агент сам
-  вычисляет правильный адрес при каждом `render-client`, и это работает
-  корректно независимо от того, слушают ли dropbear/uhttpd на `0.0.0.0`
-  или только на LAN-интерфейсе. Заполняй эти поля вручную только если
-  реальный адрес отличается от LAN IP роутера (нестандартная сеть). Если
-  роутер был добавлен **до** этого фикса и в карточке всё ещё виден
-  жёсткий `127.0.0.1` — открой **Edit** для него и просто очисти оба поля.
-
-### Что ещё скрыто/автоматизировано в локальной панели агента
-
-- Поля `Hub URL`, `VPS host`, `VLESS UUID`, `SSH VLESS UUID` в форме
-  настроек роутера (`http://IP/cgi-bin/owrt-remote?key=...`) замаскированы
-  как пароль — это адреса и секреты reverse-туннеля, не должны палиться
-  при локальном доступе к одному роутеру из флота.
-- `/etc/owrt-remote/web.key` (ключ доступа к этой локальной панели)
-  генерируется сам при первом обращении, если отсутствует — не нужно
-  создавать его вручную (`mkdir`/`head`/`chmod`), даже если установка была
-  прервана на середине из-за сетевых проблем.
-
----
-
-<div align="center">
-
-<h2> Tech Stack</h2>
-
-<h3> Router / Network / OpenWrt</h3>
-
-<p>
-  <img alt="OpenWrt" src="https://img.shields.io/badge/OpenWrt-00A3E0?style=for-the-badge&logo=openwrt&logoColor=white">
-  <img alt="LuCI" src="https://img.shields.io/badge/LuCI-44CC11?style=for-the-badge&logo=lua&logoColor=white">
-  <img alt="Dropbear" src="https://img.shields.io/badge/Dropbear-SSH-64748B?style=for-the-badge">
-  <img alt="CGI" src="https://img.shields.io/badge/CGI-Web%20Panel-e01e1e?style=for-the-badge">
-</p>
-
-<h3> VPS / Reverse / HTTPS</h3>
-
-<p>
-  <img alt="Linux" src="https://img.shields.io/badge/Linux-VPS-FCC624?style=for-the-badge&logo=linux&logoColor=111111">
-  <img alt="Python" src="https://img.shields.io/badge/Python-Hub-3776AB?style=for-the-badge&logo=python&logoColor=white">
-  <img alt="Shell" src="https://img.shields.io/badge/Shell-Installer-4EAA25?style=for-the-badge&logo=gnu-bash&logoColor=white">
-  <img alt="Xray" src="https://img.shields.io/badge/Xray-Reverse-ff6a00?style=for-the-badge">
-  <img alt="nginx" src="https://img.shields.io/badge/nginx-HTTPS-009639?style=for-the-badge&logo=nginx&logoColor=white">
-</p>
-
-</div>
-
----
-
-<div align="center">
-
----
-
-<h2> Быстрый старт</h2>
-
-После установки в конце появится вход:
-
-```text
-login:    admin
-password: <сгенерированный при установке, см. вывод инсталлятора>
-```
-
-Пароль лучше поменять сразу после первого входа.
-
-<h3> VPS: поставить Hub, Xray, firewall и HTTPS одной командой</h3>
+## Установка панели (VPS)
 
 ```sh
 curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/install-vps.sh?v=$(date +%s)" | sudo sh
 ```
 
-Установщик спросит:
+Ставит Hub + Xray, включает HTTPS автоматически, печатает URL/логин/пароль
+один раз в конце.
 
-```text
-IP/домен VPS:
-```
-
-Можно вставить домен, например:
-
-```text
-hub.example.com
-```
-
-Или просто нажать <b>Enter</b>, чтобы взять найденный IP сервера.
-
-<h3> OpenWrt: установка и обновление</h3>
+## Установка / обновление агента (роутер)
 
 Один и тот же скрипт ставит агент с нуля и обновляет уже развёрнутый —
-сам определяет, что перед ним, по наличию текущего `owrt-remote`:
+сам определяет, что перед ним, по наличию текущего `owrt-remote`.
 
 ```sh
 wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/install.sh?v=$(date +%s)" | sh
 ```
 
-При обновлении:
+При обновлении: проверяет синтаксис (`sh -n`) до установки, бэкапит
+агент и `init.d` (`.bak`), ставит атомарно (`mv`), настраивает
+`owrt-remote-watchdog` на cron. `/etc/config/owrtremote` не трогается.
 
-- проверяет синтаксис (`sh -n`) новых файлов **до** установки — битый
-  файл не попадёт на диск;
-- бэкапит текущий агент и `init.d` (`.bak`), ставит новые версии
-  атомарно (`mv`, не перезапись на месте);
-- подключает self-heal/watchdog: если после апдейта туннель не
-  поднимется за `rollback_grace_seconds` (uci, по умолчанию **30с**) —
-  агент откатится сам, без участия человека.
-
-`/etc/config/owrtremote` не трогается — существующие `vps_host`,
-токены и настройки остаются как есть.
-
-Проверка на роутере:
-
-```sh
-owrt-remote doctor
-owrt-remote status
-```
-
-<details>
-<summary align="center"><b> Если команда выше зависла на скачивании</b></summary>
-
-<div align="center">
-
-`raw.githubusercontent.com` раздаётся с нескольких Fastly IP, и конкретный
-адрес иногда недоступен из отдельной сети по несколько минут. Это
-ограничение самого паттерна <code>wget|sh</code> (текст скрипта сначала
-скачивается целиком, и только потом исполняется) — сам install.sh уже
-ничего не может сделать, пока скачивание не завершилось.
-
-<br><br>
-
-Если висит на <code>Connecting to 185.199.11X.133:443</code> дольше
-пары секунд — почини DNS вручную (без единого сетевого запроса, поэтому
-не может зависнуть так же):
-
-</div>
-
-```sh
-for ip in 185.199.108.133 185.199.109.133 185.199.110.133 185.199.111.133; do
-	sed -i '/ raw\.githubusercontent\.com$/d' /etc/hosts
-	echo "$ip raw.githubusercontent.com" >> /etc/hosts
-	wget -q -T 5 -O /dev/null https://raw.githubusercontent.com/ 2>/dev/null && echo "рабочий IP: $ip" && break
-done
-```
-
-<div align="center">
-
-После этого команда установки пройдёт нормально — DNS уже указывает
-на рабочий адрес.
-
-</div>
-
-</details>
-
-<h3> Точечное обновление и ручной rollback</h3>
-
-Накатить только новый `/usr/sbin/owrt-remote`, не трогая остальные
-файлы (например, тестовую сборку):
+Точечное обновление одного файла и ручной rollback:
 
 ```sh
 owrt-remote update /path/to/new/owrt-remote
-```
-
-Та же логика бэкапа и авто-отката по таймауту. Ручной немедленный
-откат и разовая проверка живости туннеля:
-
-```sh
 owrt-remote rollback
 owrt-remote tunnel-check
 ```
 
-Rollback намеренно дублируется в двух независимых местах:
-`self_heal_check()` внутри самого агента (быстрый путь) и отдельный
-`owrt-remote-watchdog` на cron, который не исполняет код агента и
-переживает даже полностью сломанный апдейт. `install.sh` ставит и
-настраивает watchdog сам — руками ничего дополнительно делать не нужно.
-
-<h3> Проверка cron-задачи watchdog</h3>
-
-Стоит проверить один раз после установки, не дожидаясь реального
-сбойного апдейта:
-
-```sh
-# Запись в cron, жив ли crond, синтаксис и права файла
-grep owrt-remote-watchdog /etc/crontabs/root
-ps w | grep '[c]rond'
-sh -n /usr/sbin/owrt-remote-watchdog && echo "синтаксис ок"
-```
-
-```sh
-# Ручной прогон безопасен в любой момент: без маркера обновления
-# завершается мгновенно (exit 0), без побочных эффектов — это
-# нормальное поведение 59 раз из 60
-/usr/sbin/owrt-remote-watchdog; echo "код выхода: $?"
-```
-
-```sh
-# Подтверждение, что cron реально запускает задачу, а не просто
-# "запись есть в файле"
-logread | grep -i "cron.*owrt-remote-watchdog"
-```
-
-Если запись в crontab или сам `crond` отсутствуют:
-
-```sh
-echo "* * * * * /usr/sbin/owrt-remote-watchdog" >> /etc/crontabs/root
-/etc/init.d/cron restart
-```
-
-</div>
-
----
-
-<div align="center">
-
-<h2> Схема работы</h2>
-
-</div>
-
-```mermaid
-flowchart LR
-    U[User Browser] -->|HTTPS 443| N[nginx on VPS]
-    N --> H[VodkinNet RT Hub]
-    H --> X[Xray Reverse]
-    X --> R[OpenWrt Router]
-    R --> L[LuCI]
-    R --> S[SSH / Dropbear]
-```
-
-<div align="center">
-
-<b>Главная идея:</b> роутер сам подключается к VPS изнутри сети. Наружу LuCI и SSH на роутере открывать не нужно.
-
-</div>
-
----
-
-<div align="center">
-
-<h2> Обзор панели и настройка</h2>
-
-<b>Обзор панели и настройка</b><br>
-<sub>Открытие Hub с ПК: статус роутера, LuCI и SSH Web Terminal.</sub>
-
-<br><br>
-
-<img src="assets/vodkinnet-brand.jpg"
-     alt="VodkinNet RT Hub"
-     width="720">
-
-<br><br>
-
-</div>
-
----
-
-<div align="center">
-
-<h2> Возможности</h2>
-
-<table>
-<tr>
-<th align="center">Возможность</th>
-<th align="center">Описание</th>
-</tr>
-<tr>
-<td align="center"> <b>Router Cards</b></td>
-<td align="center">Карточки роутеров в Hub-панели</td>
-</tr>
-<tr>
-<td align="center"> <b>Online / Offline</b></td>
-<td align="center">Быстрая проверка состояния роутеров</td>
-</tr>
-<tr>
-<td align="center"> <b>LuCI через VPS</b></td>
-<td align="center">Доступ к LuCI без прямого проброса портов</td>
-</tr>
-<tr>
-<td align="center"> <b>SSH Web Terminal</b></td>
-<td align="center">SSH в браузере, удобно даже с телефона</td>
-</tr>
-<tr>
-<td align="center"> <b>Xray Reverse</b></td>
-<td align="center">Роутер подключается к VPS сам</td>
-</tr>
-<tr>
-<td align="center"> <b>HTTPS через nginx</b></td>
-<td align="center">TLS-точка входа на <code>443/tcp</code></td>
-</tr>
-<tr>
-<td align="center"> <b>Firewall automation</b></td>
-<td align="center">Скрипты помогают открыть нужные порты</td>
-</tr>
-<tr>
-<td align="center"> <b>Doctor / Status</b></td>
-<td align="center">Команды диагностики на OpenWrt</td>
-</tr>
-<tr>
-<td align="center"> <b>Auto-rollback агента</b></td>
-<td align="center">Независимый cron-watchdog откатывает обновление, если туннель не поднялся</td>
-</tr>
-</table>
-
-</div>
-
----
-
-<div align="center">
-
-<h2> Подробная установка</h2>
-
-</div>
-
-<details>
-<summary align="center"><b> Установка VPS подробно</b></summary>
-
-<div align="center">
-
-Если хочешь поставить повторно, но не сбрасывать текущий пароль:
-
-</div>
-
-```sh
-curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/install-vps.sh?v=$(date +%s)" | sudo env RESET_LOGIN=0 sh
-```
-
-<div align="center">
-
-Если HTTPS не включился автоматически, HTTP-панель всё равно остаётся рабочей. После проверки firewall можно запустить:
-
-</div>
-
-```sh
-curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/enable-https.sh?v=$(date +%s)" | sudo sh -s -- YOUR_VPS_IP
-```
-
-</details>
-
-<details>
-<summary align="center"><b> HTTPS / SSL</b></summary>
-
-<div align="center">
-
-Установщик пытается включить HTTPS сам.
-
-<br><br>
-
-Схема такая:
-
-</div>
-
-```text
-Internet -> 443/nginx -> Hub -> Xray reverse -> OpenWrt
-```
-
-<div align="center">
-
-Hub работает внутри на <code>80</code> и <code>8088</code>, а HTTPS на <code>443</code> принимает nginx и прокидывает запросы в Hub.
-
-<br><br>
-
-Для установки должны быть открыты порты:
-
-</div>
-
-```text
-80/tcp    - HTTP-панель и проверка Let's Encrypt
-443/tcp   - HTTPS-панель через nginx
-8088/tcp  - прямой HTTP-порт Hub, можно закрыть позже в firewall провайдера
-8443/tcp  - Xray / reverse endpoint
-```
-
-<div align="center">
-
-Включить HTTPS вручную на IP:
-
-</div>
-
-```sh
-curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/enable-https.sh?v=$(date +%s)" | sudo sh -s -- YOUR_VPS_IP
-```
-
-<div align="center">
-
-Включить HTTPS вручную на домен:
-
-</div>
-
-```sh
-curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/enable-https.sh?v=$(date +%s)" | sudo EMAIL="you@example.com" sh -s -- hub.example.com
-```
-
-<div align="center">
-
-Проверка на VPS:
-
-</div>
-
-```sh
-sudo ss -lntp | grep -E ':(80|443|8088)\b'
-curl -sS http://127.0.0.1:8088/health
-curl -k https://127.0.0.1/health
-sudo nginx -t
-```
-
-<div align="center">
-
-Нормальная картина:
-
-<br><br>
-
-<code>443</code> слушает <code>nginx</code><br>
-<code>80</code> и <code>8088</code> слушает <code>python3</code> Hub<br>
-certbot ставит auto-renew<br>
-скрипт добавляет hook для перезагрузки nginx после обновления сертификата
-
-</div>
-
-</details>
-
-<details>
-<summary align="center"><b> Уведомления и мини-лог VPS</b></summary>
-
-<div align="center">
-
-В панели Hub открой кнопку с логином, блок <code>Уведомления</code>, и нажми <code>Включить</code>.
-
-<br><br>
-
-Что пишет Hub:
-
-<br><br>
-
-вход в панель: устройство, браузер и IP<br>
-запуск Hub<br>
-запуск VPS после перезагрузки<br>
-короткую причину прошлого выключения/ребута по журналу VPS
-
-<br><br>
-
-Важно: если VPS полностью выключился или пропал интернет, сам VPS не сможет отправить уведомление в момент падения. Событие появится после следующего запуска, когда Hub снова поднимется.
-
-</div>
-
-</details>
-
-<details>
-<summary align="center"><b> Проверка после установки</b></summary>
-
-<div align="center">
-
-На VPS:
-
-</div>
-
-```sh
-sudo systemctl status owrt-remote --no-pager -l
-sudo systemctl status owrt-remote-xray --no-pager -l
-sudo ss -lntp | grep -E ':(80|443|8088|8443|18080|18090|19080|19090)\b'
-curl -sS http://127.0.0.1:8088/health
-curl -k https://127.0.0.1/health
-```
-
-<div align="center">
-
-Должно быть:
-
-<br><br>
-
-<code>owrt-remote</code> active/running<br>
-<code>owrt-remote-xray</code> active/running<br>
-<code>*:80</code>, <code>*:443</code>, <code>*:8088</code>, <code>*:8443</code><br>
-<code>127.0.0.1:18080</code> для LuCI первого роутера<br>
-<code>127.0.0.1:19080</code> для SSH первого роутера
-
-<br><br>
-
-На OpenWrt:
-
-</div>
-
-```sh
-owrt-remote doctor
-owrt-remote status
-owrt-remote heartbeat
-```
-
-</details>
-
----
-
-<div align="center">
-
-<h2> Частые проблемы</h2>
-
-</div>
-
-<details>
-<summary align="center"><b> Панель VPS не открывается</b></summary>
-
-<div align="center">
-
-Проверь сервисы и порты:
-
-</div>
-
-```sh
-sudo systemctl status owrt-remote --no-pager -l
-sudo journalctl -u owrt-remote -n 100 --no-pager
-sudo ss -lntp | grep -E ':(80|443|8088)\b'
-curl -sS http://127.0.0.1:8088/health
-```
-
-<div align="center">
-
-Если на VPS <code>curl</code> отвечает <code>{"ok":true}</code>, но снаружи сайт не открывается, проблема почти всегда в firewall VPS-провайдера.
-
-<br><br>
-
-Открой в личном кабинете VPS:
-
-</div>
-
-```text
-80/tcp
-443/tcp
-8088/tcp
-8443/tcp
-```
-
-</details>
-
-<details>
-<summary align="center"><b> Админка пишет <code>proxy error: [Errno 111] Connection refused</code></b></summary>
-
-<div align="center">
-
-Пересобери Xray config:
-
-</div>
-
-```sh
-sudo /opt/owrt-remote/owrt-remote-hub.py render-xray --out /etc/xray/owrt-remote.json
-sudo systemctl restart owrt-remote-xray
-sudo ss -lntp | grep -E ':(18080|18090|19080|19090)\b'
-```
-
-</details>
-
-<details>
-<summary align="center"><b> SSH web-terminal просит пароль и молчит</b></summary>
-
-<div align="center">
-
-Проверь Dropbear на OpenWrt:
-
-</div>
-
-```sh
-/etc/init.d/dropbear status
-owrt-remote heartbeat
-```
-
-<div align="center">
-
-В телефоне используй поле снизу терминала:
-
-<br><br>
-
-<b>Вставить</b> — вставить текст<br>
-<b>Enter</b> — отправить Enter<br>
-<b>Отправить</b> — отправить команду или пароль
-
-</div>
-
-</details>
-
-<details>
-<summary align="center"><b> После обновления агента пропала связь с роутером</b></summary>
-
-<div align="center">
-
-Это ожидаемо в течение первых ~30 секунд после <code>owrt-remote update</code>
-или повторного запуска <code>install.sh</code> — сервис перезапускается,
-туннель на секунды обрывается. Если связь не восстановилась сама:
-
-<br><br>
-
-Подожди <code>rollback_grace_seconds</code> (по умолчанию 30с) плюс до
-минуты — <code>owrt-remote-watchdog</code> тикает по cron раз в минуту
-и откатит агент на <code>.bak</code> сам, если новый туннель так и не
-поднялся. Это не требует, чтобы новый агент вообще был исправен —
-watchdog не исполняет и не импортирует его код.
-
-<br><br>
-
-Если LAN-доступ есть, проверь напрямую:
-
-</div>
-
-```sh
-owrt-remote tunnel-check
-cat /etc/owrt-remote-rollback.log
-md5sum /usr/sbin/owrt-remote /usr/sbin/owrt-remote.bak
-```
-
-<div align="center">
-
-Если <code>rollback.log</code> пуст, а связи всё ещё нет — проверь,
-что cron реально знает про watchdog:
-
-</div>
-
-```sh
-grep owrt-remote-watchdog /etc/crontabs/root
-ps w | grep '[c]rond'
-```
-
-</details>
-
-<details>
-<summary align="center"><b> С мобильного интернета не открывается</b></summary>
-
-<div align="center">
-
-Пробуй:
-
-</div>
-
-```text
-https://YOUR_VPS_IP/
-http://YOUR_VPS_IP/
-http://YOUR_VPS_IP:8088/
-```
-
-<div align="center">
-
-Если по Wi-Fi работает, а через мобильный интернет нет, открой порты в firewall VPS-провайдера и проверь:
-
-</div>
-
-```sh
-sudo ss -lntp | grep -E ':(80|443|8088)'
-```
-
-</details>
-
----
-
-<div align="center">
-
-<h2> Удаление</h2>
-
-</div>
-
-<details>
-<summary align="center"><b> Удалить Hub с VPS полностью</b></summary>
-
-```sh
-curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/uninstall-vps.sh?v=$(date +%s)" | sudo sh
-```
-
-<div align="center">
-
-Удалится:
-
-<br><br>
-
-<code>owrt-remote</code><br>
-<code>owrt-remote-xray</code><br>
-<code>/opt/owrt-remote</code><br>
-<code>/etc/xray/owrt-remote.json</code><br>
-<code>/var/lib/owrt-remote</code><br>
-nginx-конфиг HTTPS, certbot renewal hook и старые TLS override-файлы<br>
-правила <code>ufw</code> для <code>80/tcp</code>, <code>443/tcp</code>, <code>8088/tcp</code>, <code>8443/tcp</code>
-
-<br><br>
-
-Удалить Hub, но оставить базу роутеров:
-
-</div>
-
-```sh
-curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/uninstall-vps.sh?v=$(date +%s)" | sudo env PURGE=0 sh
-```
-
-<div align="center">
-
-Удалить дополнительно сам Xray binary:
-
-</div>
-
-```sh
-curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/uninstall-vps.sh?v=$(date +%s)" | sudo env REMOVE_XRAY=1 sh
-```
-
-</details>
-
-<details>
-<summary align="center"><b> Удалить агент с OpenWrt полностью</b></summary>
-
-```sh
-wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/uninstall.sh?v=$(date +%s)" | PURGE=1 sh
-```
-
-<div align="center">
-
-Удалится:
-
-<br><br>
-
-<code>/usr/sbin/owrt-remote</code> (и <code>.bak</code>)<br>
-<code>/usr/sbin/owrt-remote-watchdog</code><br>
-<code>/etc/init.d/owrt-remote</code> (и <code>.bak</code>)<br>
-строка <code>owrt-remote-watchdog</code> в <code>/etc/crontabs/root</code><br>
-<code>/etc/owrt-remote-update-pending</code>, <code>/etc/owrt-remote-rollback.log</code><br>
-<code>/www/cgi-bin/owrt-remote</code><br>
-пункт меню LuCI<br>
-rpcd ACL<br>
-<code>/etc/config/owrtremote</code><br>
-<code>/etc/owrt-remote/web.key</code><br>
-<code>/etc/xray/owrt-remote-client.json</code>
-
-<br><br>
-
-Удалить только файлы панели, но оставить конфиг:
-
-</div>
+## Удаление
 
 ```sh
 wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/uninstall.sh?v=$(date +%s)" | sh
 ```
 
-</details>
+Останавливает агент, убирает watchdog из cron, удаляет бинарь/`init.d`/
+`.bak`/лог/маркер, LuCI-пункт меню. Конфиг и `web.key` оставляет —
+`PURGE=1 sh uninstall.sh` удалит и их.
 
----
+VPS: `.../vps/uninstall-vps.sh` (тот же принцип, `PURGE=1` для полной очистки).
 
-<div align="center">
+## Шпаргалка команд
 
-<h2> Дерево проекта</h2>
+| Где | Команда | Что делает |
+|---|---|---|
+| OpenWrt | `owrt-remote status` | статус агента |
+| OpenWrt | `owrt-remote doctor` | диагностика (xray/heartbeat/config) |
+| OpenWrt | `owrt-remote update /path` | обновить агент, бэкап + авто-rollback |
+| OpenWrt | `owrt-remote rollback` | немедленный ручной откат на `.bak` |
+| OpenWrt | `owrt-remote tunnel-check` | реальная проверка ESTABLISHED-туннеля |
+| OpenWrt | `/etc/init.d/owrt-remote start\|stop\|restart` | управление сервисом (procd) |
+| OpenWrt | `cat /etc/owrt-remote-rollback.log` | история автооткатов |
+| OpenWrt | `grep owrt-remote-watchdog /etc/crontabs/root` | проверка cron-записи watchdog |
+| OpenWrt | LuCI → Службы → OpenWrt Remote | локальная веб-панель на роутере |
+| VPS | `systemctl status owrt-remote` | статус панели |
+| VPS | `systemctl restart owrt-remote-xray` | рестарт реверс-Xray (после смены списка роутеров) |
+| Панель | "Обновить Xray CFG" → "Рестарт Xray VPS" | применить изменения списка роутеров (не автоматически) |
 
-</div>
+## Дальше: регистрация роутера в Hub
 
-<details>
-<summary align="center"><b>Открыть дерево файлов</b></summary>
+1. В панели Hub → "+ Добавить роутер": id, название, роль, VPS-хост,
+   ENTRY PORT (свободный порт на этом VPS, например 18080 — панель
+   подскажет, если порт занят другим роутером).
+2. Нажми "Обновить Xray CFG", затем "Рестарт Xray VPS" (не происходит
+   автоматически при добавлении роутера — нужно руками после каждого
+   изменения списка роутеров).
+3. Открой "Конфиг" в карточке роутера → вставь текст целиком в
+   `/etc/config/owrtremote` на этом роутере.
+4. `/etc/init.d/owrt-remote restart`
+5. `owrt-remote doctor`
 
-```text
-.
-├── install.sh
-│   └── установка агента на OpenWrt (и апдейт при повторном запуске:
-│       бэкап + rollback-маркер + идемпотентная установка cron)
-├── uninstall.sh
-│   └── удаление агента с OpenWrt
-├── files/
-│   ├── usr/sbin/owrt-remote
-│   │   └── CLI-агент: heartbeat, render-client, doctor,
-│   │       update/rollback/tunnel-check
-│   ├── usr/sbin/owrt-remote-watchdog
-│   │   └── независимый cron-джоб: откатывает .bak, если туннель не
-│   │       поднялся за rollback_grace_seconds — не зависит от
-│   │       исправности самого агента
-│   ├── etc/init.d/owrt-remote
-│   │   └── procd-сервис OpenWrt (xray + heartbeat-loop инстансы)
-│   ├── www/cgi-bin/owrt-remote
-│   │   └── веб-панель на роутере
-│   ├── usr/share/luci/menu.d/luci-app-owrt-remote.json
-│   │   └── пункт меню LuCI: Службы -> OpenWrt Remote
-│   └── usr/share/rpcd/acl.d/luci-app-owrt-remote.json
-│       └── права LuCI/rpcd
-└── vps/
-    ├── install-vps.sh
-    │   └── установка Hub, Xray, firewall и HTTPS через nginx
-    ├── enable-https.sh
-    │   └── включение HTTPS/443 через nginx вручную
-    ├── uninstall-vps.sh
-    │   └── удаление Hub с VPS
-    ├── owrt-remote-hub.py
-    │   └── веб-панель VPS, карточки, proxy, SSH terminal
-    └── owrt-remote.service
-        └── systemd-сервис Hub
-```
+## Changelog
 
-</details>
+### 2026-08-23 — rollback/watchdog-механизм после обновления агента
 
----
+Три живых бага, найденных на канарейке (`VodkinR1_Router`) при разработке:
+1. Кастомный `stop_service()` в `init.d` останавливал только `xray`,
+   оставляя `heartbeat`-инстанс не перезапущенным при `restart` — убран,
+   `procd` сам знает PID обоих инстансов.
+2. Self-overwrite: `cp` поверх работающего скрипта — переписывал inode,
+   из которого читал себя сам исполняемый процесс. Фикс — запись во
+   временный файл + атомарный `mv`.
+3. Архитектурная проблема — rollback-логика жила внутри обновляемого
+   файла. Решение — `owrt-remote-watchdog`, полностью отдельный файл на
+   cron, не исполняет код агента вообще.
 
-<div align="center">
+`install.sh` стал одновременно install- и update-скриптом: бэкап,
+`sh -n` до установки, автоустановка watchdog+cron.
 
-<h2>🧾 Мини-шпаргалка команд</h2>
+### Дубль-purpose TLS-переменные (см. полную историю в git log)
 
-<table>
-<tr>
-<th align="center">Где</th>
-<th align="center">Команда</th>
-<th align="center">Что делает</th>
-</tr>
-<tr>
-<td align="center">VPS</td>
-<td align="center"><code>systemctl status owrt-remote</code></td>
-<td align="center">статус Hub</td>
-</tr>
-<tr>
-<td align="center">VPS</td>
-<td align="center"><code>systemctl status owrt-remote-xray</code></td>
-<td align="center">статус Xray reverse</td>
-</tr>
-<tr>
-<td align="center">VPS</td>
-<td align="center"><code>curl -sS http://127.0.0.1:8088/health</code></td>
-<td align="center">healthcheck Hub</td>
-</tr>
-<tr>
-<td align="center">VPS</td>
-<td align="center"><code>sudo nginx -t</code></td>
-<td align="center">проверка nginx-конфига</td>
-</tr>
-<tr>
-<td align="center">OpenWrt</td>
-<td align="center"><code>owrt-remote doctor</code></td>
-<td align="center">диагностика агента</td>
-</tr>
-<tr>
-<td align="center">OpenWrt</td>
-<td align="center"><code>owrt-remote status</code></td>
-<td align="center">текущий статус</td>
-</tr>
-<tr>
-<td align="center">OpenWrt</td>
-<td align="center"><code>owrt-remote heartbeat</code></td>
-<td align="center">отправить heartbeat</td>
-</tr>
-<tr>
-<td align="center">OpenWrt</td>
-<td align="center"><code>owrt-remote update /path/to/new</code></td>
-<td align="center">обновить агент с бэкапом и авто-rollback</td>
-</tr>
-<tr>
-<td align="center">OpenWrt</td>
-<td align="center"><code>owrt-remote rollback</code></td>
-<td align="center">немедленный ручной откат на .bak</td>
-</tr>
-<tr>
-<td align="center">OpenWrt</td>
-<td align="center"><code>owrt-remote tunnel-check</code></td>
-<td align="center">реальная проверка ESTABLISHED-туннеля</td>
-</tr>
-<tr>
-<td align="center">OpenWrt</td>
-<td align="center"><code>cat /etc/owrt-remote-rollback.log</code></td>
-<td align="center">история автооткатов (agent + watchdog)</td>
-</tr>
-</table>
-
-</div>
-
----
-
-<div align="center">
-
-<h2> Лицензия</h2>
-
-<p>
-Этот проект распространяется под лицензией <b>MIT</b>.<br>
-Можно использовать, копировать, изменять, публиковать и распространять проект при сохранении текста лицензии.
-</p>
-
-<a href="LICENSE">
-  <img alt="MIT License" src="https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge&labelColor=111827">
-</a>
-
-</div>
-
----
-
-<div align="center">
-
-<img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=20&duration=2800&pause=800&color=ff6a00&center=true&vCenter=true&width=760&lines=VodkinNet+RT+Hub;LuCI+%2B+SSH+through+your+own+VPS;No+direct+router+ports+exposed;Built+for+remote+router+control" alt="Typing SVG" />
-
-<br>
-
-<b>VodkinNet RT Hub</b> — свой VPS, свой доступ, свои роутеры под контролем.
-
-<br><br>
-
-<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0a0603,45:e01e1e,100:ff6a00&height=120&section=footer" alt="Footer" width="100%" />
-
-</div>
-
-### 2026-07-31 — миграция на nginx-прокси + секретный путь в URL
-
-Найдено при живой security-ревизии: приложение слушало `0.0.0.0` со
-своим **встроенным TLS напрямую наружу**, полностью в обход nginx —
-из-за двух конфликтующих systemd drop-in'ов от более ранней
-недоделанной попытки фикса (`https.conf` пытался выключить встроенный
-TLS, но следующий по алфавиту `tls.conf` включал его обратно). Кроме
-того, симлинка `/etc/nginx/sites-enabled/owrt-remote` не существовало
-вовсе — файл в `sites-available` никогда реально не подключался.
-
-**Исправлено и на живом VPS, и в самом install-vps.sh** (чтобы не
-откатилось при следующей переустановке):
-- `owrt-remote.service`: `OWRT_REMOTE_BIND` теперь `127.0.0.1` вместо
-  `0.0.0.0` — приложение больше не торчит наружу напрямую.
-- Новая функция `setup_nginx_vhost()` — генерирует секретный путь в
-  URL (голый `/` отдаёт `404`, остальное работает как обычно),
-  настраивает nginx-vhost с TLS (переиспользует сертификат, уже
-  полученный через `enable_https`/certbot), включает симлинк в
-  `sites-enabled`, которого раньше не было.
-- Секретный путь сохраняется в `/etc/owrt-remote-secret-path.txt` на
-  случай, если забудется.
-
-### 2026-08-07 — КРИТИЧЕСКИЙ инцидент: весь флот роутеров разом отвалился
-
-**Что случилось**: после перевода веб-панели на nginx-прокси (см. запись
-про миграцию выше) следующий клик «Обновить Xray CFG» уронил TLS на
-самом реверс-туннеле — **все 7 роутеров** одновременно и молча
-перестали подключаться, без единой строки в логе Xray (TLS-рукопожатие
-проваливалось раньше, чем Xray успевал что-либо залогировать на уровне
-VLESS-протокола).
-
-**Причина**: `OWRT_REMOTE_TLS_CERT`/`OWRT_REMOTE_TLS_KEY` используются
-в коде **для двух разных вещей одновременно** — TLS встроенного
-листенера самой панели И (отдельно) TLS реверс-туннеля
-(`reverse_stream_settings()`, порт 8443, куда подключаются роутеры).
-При миграции на nginx эти переменные обнулили специально, чтобы
-выключить встроенный листенер панели (раз TLS теперь берёт на себя
-nginx) — но этим же случайно выключили TLS и у туннеля.
-
-**Исправлено**:
-- `install-vps.sh` (`setup_nginx_vhost()`) — `TLS_CERT`/`TLS_KEY`
-  остаются заполненными реальными путями к сертификату; выключается
-  только `TLS_PORTS` (это и есть переменная, которая реально управляет
-  тем, поднимается ли встроенный листенер, независимо от того, заданы
-  ли сами cert/key).
-- Добавлено явное предупреждение в лог (`stderr`, попадает в
-  `journalctl`) прямо в `reverse_stream_settings()` на случай, если
-  туннель всё же поднимется без TLS — чтобы это было видно сразу, а не
-  требовало вручную лезть в сгенерированный `xray.json` и искать
-  причину вслепую (именно так и пришлось делать в этот раз).
-
-Живой VPS восстановлен вручную (см. `https.conf` drop-in — это тот же
-файл, что фигурирует в записи про миграцию выше, просто под другим
-именем, чем в `install-vps.sh`; для будущих переустановок это уже не
-имеет значения, там всё в одном месте).
-
-### 2026-08-23 — auto-rollback агента после обновления, найдено вживую на канарейке
-
-**Что случилось**: при подготовке rollback-механизма для `owrt-remote update`
-на канареечном роутере (`VodkinR1_Router`) последовательно поймали три
-живых бага, каждый следующий — при тестировании фикса предыдущего.
-
-**Баг 1 — init.d глушил только xray при restart.** Кастомный
-`stop_service()` останавливал xray-процесс через ручной скан
-`/proc/*/cmdline`, но не heartbeat-инстанс — procd считал его всё ещё
-живым и не перезапускал. Итог: `restart` не подтягивал новый код агента
-в память работающего процесса, хотя на диске новый файл уже стоял.
-**Исправлено**: кастомный `stop_service()` убран целиком — procd сам
-знает PID обоих зарегистрированных инстансов и корректно их
-останавливает.
-
-**Баг 2 — self-overwrite при обновлении.** `cp` поверх
-`/usr/sbin/owrt-remote` переписывал тот же inode, из которого читал
-себя работающий процесс (сам `update`, либо `heartbeat-loop` при
-откате). На практике один раз это привело к тому, что сервис после
-`update` не поднялся вообще, без единой строки в логе. **Исправлено**:
-запись во временный файл + `mv` (атомарная замена имени, не трогает уже
-открытый файловый дескриптор) — везде, где агент или install.sh пишут
-поверх своих же рабочих файлов.
-
-**Баг 3 (архитектурный, важнее первых двух) — rollback-логика жила
-внутри обновляемого файла.** Если апдейт ставит настолько сломанную
-версию, что даже `heartbeat-loop` не поднимается — откатывать некому.
-**Исправлено**: `owrt-remote-watchdog` — полностью отдельный файл,
-`update`/`install.sh` его никогда не перезаписывают при апдейте самого
-агента, запускается через cron (не procd-инстанс сервиса), не исполняет
-и не импортирует ничего из `owrt-remote`. Живьём воспроизведено: после
-намеренно сломанного тестового апдейта `heartbeat-loop` сам не смог
-откатиться (тот же self-overwrite баг), но независимый watchdog откатил
-`.bak` штатно на следующем тике cron:
-```
-2026-08-23 01:11:00 watchdog: откат выполнен (туннель не поднялся за 20с, прошло 28с)
-```
-
-**Итог**: `owrt-remote update <path>` и повторный запуск `install.sh`
-теперь дают одинаковые гарантии — бэкап агента и `init.d`, `sh -n`
-до установки, атомарная замена, и двойная защита (self-heal в самом
-агенте + независимый cron-watchdog) на случай, если апдейт настолько
-плох, что агент вообще не может себя спасти. `rollback_grace_seconds`
-(uci) — 30с по умолчанию.
-
+`OWRT_REMOTE_TLS_CERT/KEY` управляли одновременно TLS панели и TLS
+реверс-туннеля — обнуление для миграции на nginx тихо отключило TLS
+туннеля для всего флота (7 роутеров). Переменные задокументированы,
+добавлены защитные предупреждения.

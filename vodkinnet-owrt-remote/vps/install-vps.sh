@@ -37,6 +37,27 @@ die() {
 	exit 1
 }
 
+# VodkinNET: тот же баннер, что и во всех остальных install-скриптах флота
+# (агент owrt-remote/netcraze-remote, панель netcraze-remote) — единый вид
+# установки независимо от того, что ставится и на какой ОС.
+if [ -t 1 ]; then
+	C_CYAN='\033[0;36m'; C_NC='\033[0m'
+else
+	C_CYAN=''; C_NC=''
+fi
+vodkin_banner() {
+	printf '\n'
+	printf '%b\n' "${C_CYAN}  ██╗   ██╗ ██████╗ ██████╗ ██╗  ██╗██╗███╗   ██╗${C_NC}"
+	printf '%b\n' "${C_CYAN}  ██║   ██║██╔═══██╗██╔══██╗██║ ██╔╝██║████╗  ██║${C_NC}"
+	printf '%b\n' "${C_CYAN}  ██║   ██║██║   ██║██║  ██║█████╔╝ ██║██╔██╗ ██║${C_NC}"
+	printf '%b\n' "${C_CYAN}  ╚██╗ ██╔╝██║   ██║██║  ██║██╔═██╗ ██║██║╚██╗██║${C_NC}"
+	printf '%b\n' "${C_CYAN}   ╚████╔╝ ╚██████╔╝██████╔╝██║  ██╗██║██║ ╚████║${C_NC}"
+	printf '%b\n' "${C_CYAN}    ╚═══╝   ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝${C_NC}"
+	printf '  %s\n' "${1:-VodkinNet RT Hub installer (VPS)}"
+	printf '  beverlypillzz-collab/Vodkinnet-RT\n\n'
+}
+vodkin_banner "VodkinNet RT Hub installer (VPS)"
+
 need_cmd() {
 	command -v "$1" >/dev/null 2>&1 || die "не найдена команда: $1"
 }
@@ -385,6 +406,20 @@ print_result() {
 		info '  curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/vps/enable-https.sh?v=$(date +%s)" | sudo sh -s -- '"$host"
 	fi
 	info "============================================================"
+	cat <<'EOF'
+
+Дальше:
+  1. Зайди в панель -> "+ Добавить роутер" -> заполни ID/имя/роль и
+     ENTRY PORT (свободный порт на этом VPS, например 18080 - панель
+     подскажет, если порт уже занят другим роутером).
+  2. Нажми "Обновить Xray CFG", затем "Рестарт Xray VPS" (это НЕ
+     происходит автоматически при добавлении роутера - нужно руками
+     после каждого изменения списка роутеров).
+  3. Открой "Конфиг" в карточке роутера -> вставь текст целиком в
+     /etc/config/owrtremote на роутере и запусти:
+       /etc/init.d/owrt-remote restart
+       owrt-remote doctor
+EOF
 }
 
 # VodkinNET: reverse-channel TLS cert setup. Xray (owrt-remote-xray.service)
