@@ -396,11 +396,20 @@ xray_version_matches() {
 PINNED_XRAY_VERSION="26.3.27"
 
 xray_release_asset() {
+	# VodkinNET: Linux репортит little-endian MIPS отдельными именами
+	# (mipsel/mips64el), не просто "mips" - раньше это не различалось
+	# вообще, из-за чего в теории на LE-чипе можно было бы скачать
+	# BE-сборку. Найдено на практике: реальная причина падения на
+	# конкретном роутере оказалась в другом (soft-float, см.
+	# ensure_xray_available), но эндианность всё равно стоит различать
+	# правильно, а не полагаться на то, что "mips" всегда big-endian.
 	case "$(uname -m)" in
 		aarch64|arm64) printf 'Xray-linux-arm64-v8a.zip' ;;
 		armv7l|armv7) printf 'Xray-linux-arm32-v7a.zip' ;;
 		armv6l) printf 'Xray-linux-arm32-v6.zip' ;;
+		mips64el) printf 'Xray-linux-mips64le.zip' ;;
 		mips64) printf 'Xray-linux-mips64.zip' ;;
+		mipsel) printf 'Xray-linux-mips32le.zip' ;;
 		mips) printf 'Xray-linux-mips32.zip' ;;
 		x86_64|amd64) printf 'Xray-linux-64.zip' ;;
 		i386|i686) printf 'Xray-linux-32.zip' ;;
@@ -439,13 +448,33 @@ ensure_xray_available() {
 		die "чексумма Xray-core не совпала (ожидалось $expected, получено $actual) — установка прервана"
 	fi
 
-	unzip -o -q "$tmp_zip" -d "${TMPDIR:-/opt/tmp}/xray-release-extracted" xray || die "не смог распаковать $tmp_zip"
+	# VodkinNET: найдено на практике (upstream issue XTLS/Xray-core#6270) —
+	# на MIPS-роутерах без аппаратного FPU (soft-float, часто встречается
+	# в дешёвых чипах) обычный бинарь "xray" падает с SIGSEGV сразу же,
+	# даже на "xray version" — архив для MIPS всегда содержит ВТОРОЙ,
+	# отдельно собранный "xray_softfloat", который на таких чипах и
+	# нужен. Не угадываем заранее, какой чип — просто пробуем оба
+	# реально извлечённых бинаря по очереди (softfloat первым, раз для
+	# MIPS он чаще нужен) и берём первый, который реально запускается и
+	# отвечает нужной версией.
+	unzip -o -q "$tmp_zip" -d "${TMPDIR:-/opt/tmp}/xray-release-extracted" xray xray_softfloat 2>/dev/null
 	mkdir -p "$(dirname "$NETCRAZE_XRAY_BIN")"
-	mv -f "${TMPDIR:-/opt/tmp}/xray-release-extracted/xray" "$NETCRAZE_XRAY_BIN"
-	chmod +x "$NETCRAZE_XRAY_BIN"
+
+	local candidate installed=0 src
+	for candidate in xray_softfloat xray; do
+		src="${TMPDIR:-/opt/tmp}/xray-release-extracted/$candidate"
+		[ -s "$src" ] || continue
+		chmod +x "$src"
+		if xray_version_matches "$src"; then
+			mv -f "$src" "$NETCRAZE_XRAY_BIN"
+			chmod +x "$NETCRAZE_XRAY_BIN"
+			installed=1
+			break
+		fi
+	done
 	rm -rf "$tmp_zip" "$tmp_dgst" "${TMPDIR:-/opt/tmp}/xray-release-extracted"
 
-	xray_bin_path >/dev/null 2>&1 || die "xray-core скачан в $NETCRAZE_XRAY_BIN, но не проходит проверку версии — что-то пошло не так"
+	[ "$installed" = "1" ] || die "xray-core скачан (${asset}), но ни обычный, ни softfloat-бинарь не запускается на этом устройстве — проверь архитектуру/эндианность вручную"
 	ok "Xray-core v${PINNED_XRAY_VERSION} установлен отдельной копией: $NETCRAZE_XRAY_BIN (не трогает никакой другой Xray на устройстве, если он есть)"
 }
 
