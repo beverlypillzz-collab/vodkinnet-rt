@@ -417,14 +417,13 @@ xray_release_asset() {
 	esac
 }
 
-ensure_xray_available() {
-	local asset url dgst_url tmp_zip tmp_dgst expected actual
-	if xray_bin_path >/dev/null 2>&1; then
-		return 0
-	fi
-	require_entware
-	asset="$(xray_release_asset)" || die "неизвестная архитектура ($(uname -m)) — не знаю какой релиз Xray-core качать"
-	log "Нужна отдельная копия Xray-core v${PINNED_XRAY_VERSION} для агента (не найдена или не той версии) — качаю ${asset} с GitHub..."
+# VodkinNET: пытается скачать и установить ОДИН конкретный asset.
+# Возвращает 0, если хоть один из бинарей (xray/xray_softfloat) из
+# архива реально запустился и отдал нужную версию, иначе 1 (ничего не
+# оставляет после себя при неудаче — можно звать повторно с другим
+# asset).
+try_install_xray_asset() {
+	local asset="$1" url dgst_url tmp_zip tmp_dgst expected actual
 	url="https://github.com/XTLS/Xray-core/releases/download/v${PINNED_XRAY_VERSION}/${asset}"
 	dgst_url="${url}.dgst"
 	tmp_zip="${TMPDIR:-/opt/tmp}/xray-release.zip"
@@ -432,20 +431,18 @@ ensure_xray_available() {
 	mkdir -p "$(dirname "$tmp_zip")"
 
 	if command -v curl >/dev/null 2>&1; then
-		curl -fsSL -o "$tmp_zip" "$url" || die "не смог скачать $url"
-		curl -fsSL -o "$tmp_dgst" "$dgst_url" || die "не смог скачать $dgst_url"
+		curl -fsSL -o "$tmp_zip" "$url" || return 1
+		curl -fsSL -o "$tmp_dgst" "$dgst_url" || return 1
 	else
-		wget -q -O "$tmp_zip" "$url" || die "не смог скачать $url"
-		wget -q -O "$tmp_dgst" "$dgst_url" || die "не смог скачать $dgst_url"
+		wget -q -O "$tmp_zip" "$url" || return 1
+		wget -q -O "$tmp_dgst" "$dgst_url" || return 1
 	fi
 
 	expected="$(sed -n 's/.*256= *\([0-9a-fA-F]*\).*/\1/p' "$tmp_dgst" | head -n1)"
 	actual="$(sha256sum "$tmp_zip" 2>/dev/null | awk '{print $1}')"
-	[ -n "$expected" ] || die "не смог прочитать ожидаемую чексумму из $tmp_dgst"
-	[ -n "$actual" ] || die "не смог посчитать чексумму скачанного файла (нет sha256sum?)"
-	if [ "$expected" != "$actual" ]; then
+	if [ -z "$expected" ] || [ -z "$actual" ] || [ "$expected" != "$actual" ]; then
 		rm -f "$tmp_zip" "$tmp_dgst"
-		die "чексумма Xray-core не совпала (ожидалось $expected, получено $actual) — установка прервана"
+		die "чексумма Xray-core (${asset}) не совпала (ожидалось $expected, получено $actual) — установка прервана"
 	fi
 
 	# VodkinNET: найдено на практике (upstream issue XTLS/Xray-core#6270) —
@@ -453,10 +450,9 @@ ensure_xray_available() {
 	# в дешёвых чипах) обычный бинарь "xray" падает с SIGSEGV сразу же,
 	# даже на "xray version" — архив для MIPS всегда содержит ВТОРОЙ,
 	# отдельно собранный "xray_softfloat", который на таких чипах и
-	# нужен. Не угадываем заранее, какой чип — просто пробуем оба
-	# реально извлечённых бинаря по очереди (softfloat первым, раз для
-	# MIPS он чаще нужен) и берём первый, который реально запускается и
-	# отвечает нужной версией.
+	# нужен. Пробуем оба реально извлечённых бинаря по очереди (softfloat
+	# первым, раз для MIPS он чаще нужен) и берём первый, который реально
+	# запускается и отвечает нужной версией.
 	unzip -o -q "$tmp_zip" -d "${TMPDIR:-/opt/tmp}/xray-release-extracted" xray xray_softfloat 2>/dev/null
 	mkdir -p "$(dirname "$NETCRAZE_XRAY_BIN")"
 
@@ -473,9 +469,47 @@ ensure_xray_available() {
 		fi
 	done
 	rm -rf "$tmp_zip" "$tmp_dgst" "${TMPDIR:-/opt/tmp}/xray-release-extracted"
+	[ "$installed" = "1" ]
+}
 
-	[ "$installed" = "1" ] || die "xray-core скачан (${asset}), но ни обычный, ни softfloat-бинарь не запускается на этом устройстве — проверь архитектуру/эндианность вручную"
-	ok "Xray-core v${PINNED_XRAY_VERSION} установлен отдельной копией: $NETCRAZE_XRAY_BIN (не трогает никакой другой Xray на устройстве, если он есть)"
+ensure_xray_available() {
+	local asset alt_asset
+	if xray_bin_path >/dev/null 2>&1; then
+		return 0
+	fi
+	require_entware
+	asset="$(xray_release_asset)" || die "неизвестная архитектура ($(uname -m)) — не знаю какой релиз Xray-core качать"
+	log "Нужна отдельная копия Xray-core v${PINNED_XRAY_VERSION} для агента (не найдена или не той версии) — качаю ${asset} с GitHub..."
+
+	if try_install_xray_asset "$asset"; then
+		ok "Xray-core v${PINNED_XRAY_VERSION} установлен отдельной копией: $NETCRAZE_XRAY_BIN (не трогает никакой другой Xray на устройстве, если он есть)"
+		return 0
+	fi
+
+	# VodkinNET: найдено на практике — некоторые прошивки (в т.ч. эта
+	# конкретная KeeneticOS на чипе MediaTek MT7621) сообщают через
+	# "uname -m" просто "mips"/"mips64", хотя чип реально работает в
+	# little-endian режиме — "uname" тут буквально врёт. Если НИ ОДИН
+	# бинарь из "правильного по uname" архива не запустился вообще
+	# (не просто не та версия, а полный отказ исполнения) — это тот
+	# самый признак неверной эндианности, а не soft-float. Пробуем
+	# автоматически LE-вариант того же архива, не переспрашивая
+	# пользователя и не требуя ручной правки кода.
+	case "$asset" in
+		Xray-linux-mips32.zip) alt_asset="Xray-linux-mips32le.zip" ;;
+		Xray-linux-mips64.zip) alt_asset="Xray-linux-mips64le.zip" ;;
+		*) alt_asset="" ;;
+	esac
+
+	if [ -n "$alt_asset" ]; then
+		log "${asset} не запустился на этом устройстве вообще (не проблема версии/soft-float) — похоже, uname врёт про эндианность. Пробую little-endian вариант: ${alt_asset}..."
+		if try_install_xray_asset "$alt_asset"; then
+			ok "Xray-core v${PINNED_XRAY_VERSION} (little-endian, ${alt_asset}) установлен отдельной копией: $NETCRAZE_XRAY_BIN"
+			return 0
+		fi
+	fi
+
+	die "xray-core скачан (${asset}${alt_asset:+ и ${alt_asset}}), но ни один вариант не запускается на этом устройстве — проверь архитектуру/эндианность вручную"
 }
 
 xray_pids() {
