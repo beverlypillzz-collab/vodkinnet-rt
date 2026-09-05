@@ -1722,20 +1722,6 @@ def clean_forward_cookie(cookie_header):
             chunk.strip().startswith("owrt_remote_admin=")
             or chunk.strip().startswith(f"{SESSION_COOKIE}=")
             or chunk.strip().startswith(f"{ROUTER_COOKIE}=")
-            # VodkinNET: живой баг, найденный по скриншоту с зацикленным
-            # редиректом — sysauth_http/sysauth — СОБСТВЕННАЯ сессионная
-            # кука LuCI/uhttpd, валидна только для ОДНОГО конкретного
-            # роутера. Все роутеры проксируются через один и тот же домен
-            # hub.vodkin.net, поэтому у браузера одна кукикорзина на всех —
-            # после логина в LuCI роутера A её же куку браузер шлёт при
-            # заходе на роутер B. uhttpd роутера B не узнаёт чужой токен и
-            # зацикливается на редиректе логина (через rewrite_location
-            # относительный "/" превращается в тот же /access/{id}/,
-            # откуда только что пришли — бесконечный цикл). Не пропускаем
-            # чужую LuCI-сессию дальше — пусть каждый роутер логинится
-            # отдельно, это и корректно с точки зрения безопасности.
-            or chunk.strip().startswith("sysauth_http=")
-            or chunk.strip().startswith("sysauth=")
         ):
             continue
         parts.append(chunk.strip())
@@ -4610,7 +4596,7 @@ class Handler(BaseHTTPRequestHandler):
                 if low in {"cache-control", "connection", "content-length", "content-type", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"}:
                     continue
                 if low == "location":
-                    value = rewrite_location(value, prefix, public_hosts)
+                    value = rewrite_location(value, prefix, port)
                 if low == "set-cookie":
                     value = rewrite_cookie_path(value, "/")
                 resp_headers.append((key, value))
@@ -4647,24 +4633,12 @@ class Handler(BaseHTTPRequestHandler):
                 limiter.release()
 
 
-def rewrite_location(value, prefix, public_hosts=None):
+def rewrite_location(value, prefix, port):
     if value.startswith("/"):
         return prefix + value
-    # VodkinNET: раньше проверялся только http://127.0.0.1:{entry_port} —
-    # порт РЕВЕРС-ТУННЕЛЯ на стороне VPS. Но LuCI/uhttpd после логина
-    # генерирует Location на основе СВОЕГО локального представления о себе
-    # (обычно admin_host без явного порта = 80, или admin_host:admin_port) —
-    # это другое число, никак не связанное с entry_port. Раньше это не
-    # матчилось вообще, и браузер улетал на голый 127.0.0.1 снаружи прокси.
-    # Теперь используем тот же полный public_hosts, что уже применяется
-    # для переписывания тела страницы (rewrite_html) — включает
-    # admin_host, admin_host:admin_port и их варианты с портами по
-    # умолчанию (80/443).
-    for host in public_hosts or []:
-        for scheme in ("http", "https"):
-            base = f"{scheme}://{host}"
-            if value == base or value.startswith(base + "/"):
-                return prefix + value[len(base):]
+    for base in (f"http://127.0.0.1:{port}", f"http://localhost:{port}"):
+        if value.startswith(base + "/"):
+            return prefix + value[len(base):]
     return value
 
 
