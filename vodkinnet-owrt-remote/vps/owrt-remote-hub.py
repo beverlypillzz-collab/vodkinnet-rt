@@ -1722,6 +1722,20 @@ def clean_forward_cookie(cookie_header):
             chunk.strip().startswith("owrt_remote_admin=")
             or chunk.strip().startswith(f"{SESSION_COOKIE}=")
             or chunk.strip().startswith(f"{ROUTER_COOKIE}=")
+            # VodkinNET: живой баг, найденный по скриншоту с зацикленным
+            # редиректом — sysauth_http/sysauth — СОБСТВЕННАЯ сессионная
+            # кука LuCI/uhttpd, валидна только для ОДНОГО конкретного
+            # роутера. Все роутеры проксируются через один и тот же домен
+            # hub.vodkin.net, поэтому у браузера одна кукикорзина на всех —
+            # после логина в LuCI роутера A её же куку браузер шлёт при
+            # заходе на роутер B. uhttpd роутера B не узнаёт чужой токен и
+            # зацикливается на редиректе логина (через rewrite_location
+            # относительный "/" превращается в тот же /access/{id}/,
+            # откуда только что пришли — бесконечный цикл). Не пропускаем
+            # чужую LuCI-сессию дальше — пусть каждый роутер логинится
+            # отдельно, это и корректно с точки зрения безопасности.
+            or chunk.strip().startswith("sysauth_http=")
+            or chunk.strip().startswith("sysauth=")
         ):
             continue
         parts.append(chunk.strip())
