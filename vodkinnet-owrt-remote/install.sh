@@ -389,6 +389,35 @@ install_watchdog_cron() {
 	fi
 }
 
+# VodkinNET: живой баг, найденный вживую на канарейках VodkinR15/node-8/
+# node-10 (2026-09-05) — свежие сборки OpenWrt (WR3000U, WBR3000UAX)
+# держат uhttpd.main.redirect_https='1' по умолчанию. Hub намеренно ходит
+# к веб-морде роутера по чистому HTTP (шифрование уже есть на уровне
+# VLESS-туннеля + TLS самого Hub) — с этой настройкой uhttpd на ЛЮБОЙ
+# такой запрос отвечает 307 на https://<тот же хост>/<тот же путь>,
+# что после переписывания Hub'ом указывает ровно на тот URL, откуда
+# начали — бесконечный цикл в браузере. Чинить на стороне Hub нельзя:
+# реверс-туннель проброшен конкретно на admin_port (обычно 80, не 443),
+# TLS-хендшейк на этот же канал просто виснет (порт не понимает TLS).
+# Единственное надёжное место — сам роутер, поэтому это часть
+# стандартной установки/апдейта агента, а не разовый костыль на одном
+# устройстве: идемпотентно, не трогает uhttpd, если и так уже 0.
+fix_uhttpd_redirect_https() {
+	local uhttpd_bin current
+	uhttpd_bin="$(target_path etc/init.d/uhttpd)"
+	[ -x "$uhttpd_bin" ] || return 0
+	command -v uci >/dev/null 2>&1 || return 0
+
+	current="$(uci -q get uhttpd.main.redirect_https 2>/dev/null || echo '')"
+	[ "$current" = "0" ] && return 0
+
+	uci set uhttpd.main.redirect_https='0' 2>/dev/null || return 0
+	uci commit uhttpd 2>/dev/null || return 0
+	info "uhttpd.main.redirect_https был '${current:-1}', выставлен в '0' (иначе веб-морда через Hub уходит в бесконечный редирект-цикл)."
+	"$uhttpd_bin" restart >/dev/null 2>&1 || true
+}
+fix_uhttpd_redirect_https
+
 install_owrt_remote_core
 install_file_checked "usr/sbin/owrt-remote-watchdog" 0755
 install_config
