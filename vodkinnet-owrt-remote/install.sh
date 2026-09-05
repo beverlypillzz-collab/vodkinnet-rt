@@ -389,34 +389,94 @@ install_watchdog_cron() {
 	fi
 }
 
-# VodkinNET: живой баг, найденный вживую на канарейках VodkinR15/node-8/
-# node-10 (2026-09-05) — свежие сборки OpenWrt (WR3000U, WBR3000UAX)
-# держат uhttpd.main.redirect_https='1' по умолчанию. Hub намеренно ходит
-# к веб-морде роутера по чистому HTTP (шифрование уже есть на уровне
-# VLESS-туннеля + TLS самого Hub) — с этой настройкой uhttpd на ЛЮБОЙ
-# такой запрос отвечает 307 на https://<тот же хост>/<тот же путь>,
-# что после переписывания Hub'ом указывает ровно на тот URL, откуда
-# начали — бесконечный цикл в браузере. Чинить на стороне Hub нельзя:
-# реверс-туннель проброшен конкретно на admin_port (обычно 80, не 443),
-# TLS-хендшейк на этот же канал просто виснет (порт не понимает TLS).
-# Единственное надёжное место — сам роутер, поэтому это часть
-# стандартной установки/апдейта агента, а не разовый костыль на одном
-# устройстве: идемпотентно, не трогает uhttpd, если и так уже 0.
-fix_uhttpd_redirect_https() {
-	local uhttpd_bin current
+# VodkinNET: живой баг, найденный вживую на канарейках (VodkinR15/node-8/
+# node-10, 2026-09-05) — свежие сборки OpenWrt (WR3000U, WBR3000UAX)
+# держат uhttpd.main.redirect_https='1'. Hub ходит к веб-морде роутера по
+# чистому HTTP (шифрование уже есть на уровне VLESS-туннеля + TLS самого
+# Hub) — с этой настройкой ЛЮБОЙ такой запрос получает 307 на
+# https://<тот же хост>/<тот же путь>, что после переписывания Hub'ом
+# указывает ровно на исходный URL — бесконечный цикл в браузере.
+#
+# ПЕРВАЯ версия фикса (в этом же коммите-истории) просто гасила
+# redirect_https глобально — но это тот же uhttpd.main, что слушает и
+# LAN-порт 80/443, а форсированный HTTPS там реально нужен для защиты
+# локальной сессии в браузере на LAN. Правильный фикс — отдельный,
+# ВТОРОЙ инстанс uhttpd, слушающий ТОЛЬКО 127.0.0.1 на своём порту, без
+# redirect_https, специально для туннеля. Основной инстанс (LAN) не
+# трогаем вообще — ни порты, ни redirect_https.
+port_is_free() {
+	local port="$1" hex busy
+	hex="$(printf '%04X' "$port")"
+	busy="$(awk -v hex="$hex" '
+		$4 == "0A" {
+			split($2, a, ":")
+			if (a[2] == hex && (a[1] == "00000000" || a[1] == "0100007F")) { print "busy"; exit }
+		}
+	' /proc/net/tcp 2>/dev/null)"
+	[ -z "$busy" ]
+}
+
+find_free_loopback_port() {
+	local port=8080
+	while [ "$port" -lt 8180 ]; do
+		if port_is_free "$port"; then
+			printf '%s' "$port"
+			return 0
+		fi
+		port=$((port + 10))
+	done
+	return 1
+}
+
+setup_tunnel_admin_uhttpd() {
+	local uhttpd_bin section port existing_port lua_prefixes lp
 	uhttpd_bin="$(target_path etc/init.d/uhttpd)"
 	[ -x "$uhttpd_bin" ] || return 0
 	command -v uci >/dev/null 2>&1 || return 0
 
-	current="$(uci -q get uhttpd.main.redirect_https 2>/dev/null || echo '')"
-	[ "$current" = "0" ] && return 0
+	section="owrt_remote_admin"
 
-	uci set uhttpd.main.redirect_https='0' 2>/dev/null || return 0
-	uci commit uhttpd 2>/dev/null || return 0
-	info "uhttpd.main.redirect_https был '${current:-1}', выставлен в '0' (иначе веб-морда через Hub уходит в бесконечный редирект-цикл)."
-	"$uhttpd_bin" restart >/dev/null 2>&1 || true
+	# Уже настроено раньше (повторный запуск install.sh) — переиспользуем
+	# существующий порт, не плодим второй инстанс поверх первого.
+	existing_port="$(uci -q get "uhttpd.${section}.listen_http" 2>/dev/null | sed -n 's/^127\.0\.0\.1:\([0-9]*\)$/\1/p')"
+	if [ -n "$existing_port" ]; then
+		port="$existing_port"
+	else
+		port="$(find_free_loopback_port)" || {
+			info "не нашёл свободный loopback-порт для отдельного uhttpd-инстанса, редирект-цикл придётся чинить вручную"
+			return 1
+		}
+
+		uci -q delete "uhttpd.${section}" 2>/dev/null
+		uci set "uhttpd.${section}=uhttpd"
+		uci set "uhttpd.${section}.listen_http=127.0.0.1:${port}"
+		uci set "uhttpd.${section}.redirect_https=0"
+		uci set "uhttpd.${section}.home=$(uci -q get uhttpd.main.home || echo /www)"
+		uci set "uhttpd.${section}.cgi_prefix=$(uci -q get uhttpd.main.cgi_prefix || echo /cgi-bin)"
+		uci set "uhttpd.${section}.ubus_prefix=$(uci -q get uhttpd.main.ubus_prefix || echo /ubus)"
+		uci set "uhttpd.${section}.script_timeout=$(uci -q get uhttpd.main.script_timeout || echo 60)"
+		uci set "uhttpd.${section}.network_timeout=$(uci -q get uhttpd.main.network_timeout || echo 30)"
+		uci set "uhttpd.${section}.max_requests=$(uci -q get uhttpd.main.max_requests || echo 3)"
+		uci set "uhttpd.${section}.max_connections=$(uci -q get uhttpd.main.max_connections || echo 100)"
+		uci -q delete "uhttpd.${section}.lua_prefix" 2>/dev/null
+		lua_prefixes="$(uci -q get uhttpd.main.lua_prefix 2>/dev/null)"
+		for lp in $lua_prefixes; do
+			uci add_list "uhttpd.${section}.lua_prefix=$lp"
+		done
+		uci commit uhttpd
+		info "второй uhttpd-инстанс на 127.0.0.1:${port} (только туннель, без redirect_https) — LAN-инстанс (0.0.0.0:80/443, redirect_https) не тронут."
+		"$uhttpd_bin" restart >/dev/null 2>&1 || true
+	fi
+
+	# admin_port в конфиге агента — то самое значение, которое render_client_config
+	# использует для reverse-туннеля и которое агент репортит в Hub каждым
+	# heartbeat (тот же самообновляющийся механизм, что и у netcraze-remote).
+	if [ -f "$(target_path etc/config/owrtremote)" ] && uci -q get owrtremote.main >/dev/null 2>&1; then
+		uci set owrtremote.main.admin_port="$port"
+		uci commit owrtremote
+	fi
 }
-fix_uhttpd_redirect_https
+setup_tunnel_admin_uhttpd
 
 install_owrt_remote_core
 install_file_checked "usr/sbin/owrt-remote-watchdog" 0755
