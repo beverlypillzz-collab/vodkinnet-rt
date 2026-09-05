@@ -4593,48 +4593,6 @@ class Handler(BaseHTTPRequestHandler):
                         backend.close()
             if last_exc is not None:
                 raise last_exc
-
-            # VodkinNET: живой баг, найденный вживую — некоторые роутеры
-            # (найдено на WR3000U и WBR3000UAX, вероятно дефолт свежих
-            # сборок OpenWrt) держат uhttpd.main.redirect_https='1' и
-            # принудительно шлют 3xx на https://<тот же хост>/<тот же путь>
-            # ДАЖЕ для запроса, который мы намеренно шлём по чистому HTTP
-            # (шифрование и так уже есть — VLESS-туннель + TLS на самом
-            # Hub, бэкенд-плечо специально идёт по HTTP). После
-            # переписывания такой редирект указывает ровно на тот URL,
-            # с которого начали — бесконечный цикл в браузере, независимо
-            # от кук/сессий (это НЕ то, что чинили раньше — та проблема
-            # была реальной, но отдельной). Вместо пересылки такого
-            # редиректа в браузер Hub сам повторяет ЭТОТ ЖЕ запрос по
-            # HTTPS к тому же бэкенду и использует уже его ответ.
-            if 300 <= resp_status < 400:
-                loc_raw = ""
-                for k, v in resp_raw_headers:
-                    if k.lower() == "location":
-                        loc_raw = v
-                        break
-                parsed_loc = urllib.parse.urlsplit(loc_raw)
-                same_origin_https_upgrade = (
-                    parsed_loc.scheme == "https"
-                    and parsed_loc.hostname in ("127.0.0.1", "localhost", None, "")
-                    and (parsed_loc.path or "/") == target.split("?", 1)[0]
-                )
-                if same_origin_https_upgrade:
-                    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-                    ctx.check_hostname = False
-                    ctx.verify_mode = ssl.CERT_NONE
-                    backend = None
-                    try:
-                        backend = http.client.HTTPSConnection("127.0.0.1", port, timeout=PROXY_TIMEOUT, context=ctx)
-                        backend.request(self.command, target, body=body, headers=headers)
-                        resp = backend.getresponse()
-                        resp_status = resp.status
-                        resp_raw_headers = resp.getheaders()
-                        resp_body = resp.read()
-                        content_type = resp.getheader("Content-Type", "")
-                    finally:
-                        if backend is not None:
-                            backend.close()
             resp_headers = []
             prefix = f"/access/{urllib.parse.quote(router_id)}"
             public_hosts = normalize_public_hosts(
