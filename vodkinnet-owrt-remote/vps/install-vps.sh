@@ -434,10 +434,32 @@ EOF
 # services, so without this hook the reverse channel silently starts serving
 # a stale/unreadable cert after the next renewal.
 setup_reverse_tls() {
-	cert="${OWRT_REMOTE_TLS_CERT:-}"
-	[ -n "$cert" ] || return 0
+	host="$1"
+	# VodkinNET: живой инцидент 2026-09-07 при переезде на новый VPS —
+	# эта функция раньше читала OWRT_REMOTE_TLS_CERT ТОЛЬКО из переменной
+	# окружения и вызывалась ДО enable_https "$host" (которая только и
+	# выпускает сертификат через certbot) — то есть переменная физически
+	# не могла быть задана на этот момент при обычном запуске скрипта.
+	# Функция тихо возвращала 0 (успех), реверс-туннель поднимался без
+	# TLS ("security": "none"), роутеры (ожидающие TLS) не могли
+	# подключиться — БЕЗ единой записи в логе, потому что TLS-рукопожатие
+	# проваливалось раньше, чем Xray успевал что-либо залогировать на
+	# уровне VLESS-протокола. Нашли и починили спустя несколько часов
+	# диагностики на живом флоте. Теперь: (1) сама вычисляет путь из
+	# host, как и setup_nginx_vhost, а не полагается только на внешнюю
+	# переменную; (2) вызывается ПОСЛЕ enable_https, когда сертификат
+	# уже точно существует; (3) если всё равно не находит сертификат —
+	# громко предупреждает, а не молчит.
+	cert="${OWRT_REMOTE_TLS_CERT:-/etc/letsencrypt/live/${host}/fullchain.pem}"
+	if [ -z "$cert" ]; then
+		warn "OWRT_REMOTE_TLS_CERT пуст и host не задан — реверс-туннель поднимется БЕЗ TLS. Роутеры, ожидающие TLS, не смогут подключиться."
+		return 0
+	fi
 	cert_dir="$(dirname "$cert")"
-	[ -d "$cert_dir" ] || return 0
+	if [ ! -d "$cert_dir" ]; then
+		warn "Сертификат для реверс-туннеля не найден: $cert_dir не существует. Реверс-туннель поднимется БЕЗ TLS — роутеры, ожидающие TLS, не смогут подключиться. Проверь enable_https/certbot и перезапусти setup_reverse_tls вручную при необходимости."
+		return 0
+	fi
 
 	if ! getent group ssl-cert >/dev/null 2>&1; then
 		$SUDO groupadd -f ssl-cert >/dev/null 2>&1 || true
@@ -482,11 +504,11 @@ main() {
 	install_files
 	install_python_deps
 	install_xray_service
-	setup_reverse_tls
 	open_firewall
 	start_hub
 	check_hub || die "Hub установлен, но сервис не поднялся. Лог выше."
 	enable_https "$host"
+	setup_reverse_tls "$host"
 	setup_nginx_vhost "$host"
 	print_result "$host"
 }
