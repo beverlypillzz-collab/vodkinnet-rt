@@ -4598,7 +4598,25 @@ class Handler(BaseHTTPRequestHandler):
                 if low == "location":
                     value = rewrite_location(value, prefix, public_hosts)
                 if low == "set-cookie":
-                    value = rewrite_cookie_path(value, "/")
+                    # VodkinNET: живой инцидент 2026-09-05/08 — раньше
+                    # тут стоял жёсткий "/", из-за чего sysauth_http от
+                    # LuCI ЛЮБОГО роутера был виден браузеру ВЕЗДЕ на
+                    # hub.vodkin.net, включая другие роутеры. Пробовали
+                    # чинить вырезанием sysauth_http в
+                    # clean_forward_cookie() — сломало логин ВСЕМ
+                    # роутерам разом (кука не доживала даже до
+                    # следующего запроса к ТОМУ ЖЕ роутеру). Правильный
+                    # фикс — не резать, а СКОУПИТЬ: Path = prefix
+                    # ("/access/{router_id}") вместо "/". Браузер сам,
+                    # по своей собственной логике cookie-scoping, не
+                    # отправит эту куку на /access/{другой_id}/ — без
+                    # всякого серверного вырезания. Наши СОБСТВЕННЫЕ
+                    # куки (owrt_remote_session/router/admin) этой
+                    # веткой не затрагиваются — они выставляются
+                    # отдельно, напрямую через current_router_cookie()
+                    # и save_auth()/login-хендлеры, не проходят через
+                    # эту функцию вообще.
+                    value = rewrite_cookie_path(value, prefix)
                 resp_headers.append((key, value))
             if should_rewrite_body(content_type):
                 resp_body = rewrite_html(resp_body, prefix, content_type, public_hosts)
