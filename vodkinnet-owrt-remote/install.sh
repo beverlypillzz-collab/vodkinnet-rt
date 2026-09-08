@@ -437,7 +437,7 @@ find_free_loopback_port() {
 }
 
 setup_tunnel_admin_uhttpd() {
-	local uhttpd_bin section port existing_port lua_prefixes lp
+	local uhttpd_bin section port existing_port lua_prefixes lp old_admin_host old_admin_port initd
 	uhttpd_bin="$(target_path etc/init.d/uhttpd)"
 	[ -x "$uhttpd_bin" ] || return 0
 	command -v uci >/dev/null 2>&1 || return 0
@@ -477,9 +477,34 @@ setup_tunnel_admin_uhttpd() {
 	fi
 
 	if [ -f "$(target_path etc/config/owrtremote)" ] && uci -q get owrtremote.main >/dev/null 2>&1; then
+		old_admin_host="$(uci -q get owrtremote.main.admin_host 2>/dev/null || echo '')"
+		old_admin_port="$(uci -q get owrtremote.main.admin_port 2>/dev/null || echo '')"
 		uci set owrtremote.main.admin_host="127.0.0.1"
 		uci set owrtremote.main.admin_port="$port"
 		uci commit owrtremote
+
+		# VodkinNET: живой инцидент 2026-09-08 — admin_host/admin_port
+		# менялись в uci, но агент продолжал работать со СТАРЫМ, уже
+		# сгенерированным клиентским xray-конфигом (redirect: старый
+		# LAN IP:80) до тех пор, пока кто-то не рестартовал его вручную.
+		# Несколько часов диагностики на живом node-10, прежде чем
+		# нашли — редирект-цикл в браузере был из-за рассинхрона между
+		# uci (уже новый) и реально работающим Xray-клиентом (ещё
+		# старый). Раз это ОБНОВЛЕНИЕ уже существующей установки (иначе
+		# бы мы сюда не попали — файл конфига уже существовал), агент
+		# уже наверняка работает — рестартуем сами, не оставляя это
+		# ручным шагом, о котором легко забыть.
+		if [ "$old_admin_host" != "127.0.0.1" ] || [ "$old_admin_port" != "$port" ]; then
+			initd="$(target_path etc/init.d/owrt-remote)"
+			if [ -x "$initd" ]; then
+				info "admin_host/admin_port изменились — перезапускаю owrt-remote, чтобы Xray-клиент подхватил новую цель."
+				# В фоне: если это выполняется через сам туннель,
+				# рестарт может оборвать текущую SSH-сессию раньше,
+				# чем install.sh допишет остальной вывод — тот же
+				# приём, что уже используется в owrt-remote-watchdog.
+				( "$initd" restart >/dev/null 2>&1 & )
+			fi
+		fi
 	fi
 }
 setup_tunnel_admin_uhttpd
