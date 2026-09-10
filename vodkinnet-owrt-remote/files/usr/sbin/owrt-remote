@@ -35,6 +35,15 @@ OWRT_REMOTE_INITD_BAK="${OWRT_REMOTE_INITD}.bak"
 UPDATE_MARKER="/etc/owrt-remote-update-pending"
 ROLLBACK_LOG="/etc/owrt-remote-rollback.log"
 
+# VodkinNET: тот же self-heal принцип, но для смены admin_host/admin_port
+# (второй uhttpd-инстанс для туннеля, см. install.sh:
+# setup_tunnel_admin_uhttpd/finalize_tunnel_admin_config) — отдельный
+# маркер, потому что это отдельное, самостоятельное изменение конфига,
+# не связанное с обновлением самого бинарника агента. Формат файла —
+# 3 строки: unix-время, старый admin_host, старый admin_port (значения
+# ДО изменения, чтобы было куда откатывать).
+CONFIG_MARKER="/etc/owrt-remote-config-pending"
+
 log() {
 	printf '%s\n' "$*" >&2
 }
@@ -61,6 +70,7 @@ usage() {
   owrt-remote heartbeat-loop
   owrt-remote update /path/to/new/owrt-remote
   owrt-remote rollback
+  owrt-remote rollback-config
   owrt-remote tunnel-check
 
 Настройки лежат в /etc/config/owrtremote.
@@ -74,6 +84,12 @@ update:
 
 rollback:
   Ручной немедленный откат на owrt-remote.bak, без ожидания.
+
+rollback-config:
+  То же самое, но для admin_host/admin_port (второй uhttpd-инстанс для
+  туннеля, ставится install.sh) — возвращает старые значения и убирает
+  этот инстанс. heartbeat-loop делает это сам, если после смены
+  admin_host/admin_port туннель не поднялся за rollback_grace_seconds.
 
 tunnel-check:
   Разовая проверка: есть ли ESTABLISHED TCP-сессия к vps_host:vps_port
@@ -825,6 +841,90 @@ self_heal_check() {
 	fi
 }
 
+rollback_tunnel_admin_config() {
+	local reason="$1" old_host old_port
+
+	if [ ! -f "$CONFIG_MARKER" ]; then
+		log "ROLLBACK CONFIG запрошен (${reason}), но ${CONFIG_MARKER} отсутствует — нечего откатывать"
+		return 1
+	fi
+
+	old_host="$(sed -n '2p' "$CONFIG_MARKER" 2>/dev/null)"
+	old_port="$(sed -n '3p' "$CONFIG_MARKER" 2>/dev/null)"
+	if [ -z "$old_host" ] || [ -z "$old_port" ]; then
+		log "ROLLBACK CONFIG: маркер ${CONFIG_MARKER} повреждён (нет сохранённых старых admin_host/admin_port) — откат прерван"
+		rm -f "$CONFIG_MARKER"
+		return 1
+	fi
+
+	log "ROLLBACK CONFIG: ${reason} — возвращаю admin_host=${old_host} admin_port=${old_port}, убираю второй uhttpd-инстанс"
+
+	# VodkinNET: "__UNSET__" — install.sh так помечает случай, когда
+	# admin_host/admin_port ДО изменения вообще не были заданы в uci
+	# (свежий роутер). Откатываться нужно к "не задано", а не к
+	# буквальной пустой строке — это разные вещи для uci.
+	if [ "$old_host" = "__UNSET__" ]; then
+		uci delete owrtremote.main.admin_host 2>/dev/null
+	else
+		uci set owrtremote.main.admin_host="$old_host" 2>/dev/null
+	fi
+	if [ "$old_port" = "__UNSET__" ]; then
+		uci delete owrtremote.main.admin_port 2>/dev/null
+	else
+		uci set owrtremote.main.admin_port="$old_port" 2>/dev/null
+	fi
+	uci commit owrtremote 2>/dev/null
+
+	# VodkinNET: убираем именно ту секцию, что создавал
+	# setup_tunnel_admin_uhttpd() в install.sh — если её не трогать,
+	# после отката admin_host/admin_port инстанс просто останется висеть
+	# без дела (не вреден сам по себе, но и не нужен, раз откатываемся
+	# на состояние ДО него).
+	if uci -q get uhttpd.owrt_remote_admin >/dev/null 2>&1; then
+		uci delete uhttpd.owrt_remote_admin 2>/dev/null
+		uci commit uhttpd 2>/dev/null
+		[ -x /etc/init.d/uhttpd ] && /etc/init.d/uhttpd restart >/dev/null 2>&1
+	fi
+
+	rm -f "$CONFIG_MARKER"
+	printf '%s откат конфига выполнен: %s\n' "$(date '+%F %T' 2>/dev/null || echo '?')" "$reason" >>"$ROLLBACK_LOG" 2>/dev/null
+
+	# Фоном, тем же приёмом, что и rollback_agent() — не блокируем
+	# heartbeat-loop, из которого вызваны.
+	( /etc/init.d/owrt-remote restart >/dev/null 2>&1 & )
+}
+
+self_heal_check_config() {
+	local marker_ts now elapsed grace
+
+	[ -f "$CONFIG_MARKER" ] || return 0
+
+	marker_ts="$(sed -n '1p' "$CONFIG_MARKER" 2>/dev/null)"
+	case "$marker_ts" in
+		''|*[!0-9]*)
+			# битый маркер — не даём self-heal застрять в цикле навсегда
+			rm -f "$CONFIG_MARKER"
+			return 0
+			;;
+	esac
+
+	if tunnel_established; then
+		log "self-heal: туннель поднят после смены admin_host/admin_port — подтверждаю новую конфигурацию"
+		rm -f "$CONFIG_MARKER"
+		return 0
+	fi
+
+	now="$(date +%s 2>/dev/null || echo 0)"
+	elapsed=$((now - marker_ts))
+	grace="$(safe_num "$(uci_get rollback_grace_seconds 30)" 30)"
+
+	if [ "$elapsed" -ge "$grace" ]; then
+		rollback_tunnel_admin_config "туннель не поднялся за ${grace}с после смены admin_host/admin_port"
+	else
+		log "self-heal: жду туннель после смены admin_host/admin_port, прошло ${elapsed}с из ${grace}с"
+	fi
+}
+
 update_agent() {
 	local newfile grace tmp_bin
 	newfile="$1"
@@ -867,6 +967,7 @@ heartbeat_loop() {
 	while :; do
 		send_heartbeat >/dev/null 2>&1 || true
 		self_heal_check
+		self_heal_check_config
 		sleep "$interval"
 	done
 }
@@ -1197,6 +1298,9 @@ case "$cmd" in
 		;;
 	rollback)
 		rollback_agent "ручной откат по команде оператора"
+		;;
+	rollback-config)
+		rollback_tunnel_admin_config "ручной откат admin_host/admin_port по команде оператора"
 		;;
 	tunnel-check)
 		if tunnel_established; then
