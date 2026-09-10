@@ -437,7 +437,7 @@ find_free_loopback_port() {
 }
 
 setup_tunnel_admin_uhttpd() {
-	local uhttpd_bin section port existing_port lua_prefixes lp
+	local uhttpd_bin section existing_port lua_prefixes lp
 	uhttpd_bin="$(target_path etc/init.d/uhttpd)"
 	[ -x "$uhttpd_bin" ] || return 0
 	command -v uci >/dev/null 2>&1 || return 0
@@ -448,42 +448,73 @@ setup_tunnel_admin_uhttpd() {
 	# существующий порт, не плодим второй инстанс поверх первого.
 	existing_port="$(uci -q get "uhttpd.${section}.listen_http" 2>/dev/null | sed -n 's/^127\.0\.0\.1:\([0-9]*\)$/\1/p')"
 	if [ -n "$existing_port" ]; then
-		port="$existing_port"
-	else
-		port="$(find_free_loopback_port)" || {
-			info "не нашёл свободный loopback-порт для отдельного uhttpd-инстанса, редирект-цикл придётся чинить вручную"
-			return 1
-		}
-
-		uci -q delete "uhttpd.${section}" 2>/dev/null || true
-		uci set "uhttpd.${section}=uhttpd"
-		uci set "uhttpd.${section}.listen_http=127.0.0.1:${port}"
-		uci set "uhttpd.${section}.redirect_https=0"
-		uci set "uhttpd.${section}.home=$(uci -q get uhttpd.main.home || echo /www)"
-		uci set "uhttpd.${section}.cgi_prefix=$(uci -q get uhttpd.main.cgi_prefix || echo /cgi-bin)"
-		uci set "uhttpd.${section}.ubus_prefix=$(uci -q get uhttpd.main.ubus_prefix || echo /ubus)"
-		uci set "uhttpd.${section}.script_timeout=$(uci -q get uhttpd.main.script_timeout || echo 60)"
-		uci set "uhttpd.${section}.network_timeout=$(uci -q get uhttpd.main.network_timeout || echo 30)"
-		uci set "uhttpd.${section}.max_requests=$(uci -q get uhttpd.main.max_requests || echo 3)"
-		uci set "uhttpd.${section}.max_connections=$(uci -q get uhttpd.main.max_connections || echo 100)"
-		uci -q delete "uhttpd.${section}.lua_prefix" 2>/dev/null || true
-		lua_prefixes="$(uci -q get uhttpd.main.lua_prefix 2>/dev/null)"
-		for lp in $lua_prefixes; do
-			uci add_list "uhttpd.${section}.lua_prefix=$lp"
-		done
-		uci commit uhttpd
-		info "второй uhttpd-инстанс на 127.0.0.1:${port} (только туннель, без redirect_https) — LAN-инстанс (0.0.0.0:80/443, redirect_https) не тронут."
-		"$uhttpd_bin" restart >/dev/null 2>&1 || true
+		TUNNEL_ADMIN_PORT="$existing_port"
+		return 0
 	fi
 
-	if [ -f "$(target_path etc/config/owrtremote)" ] && uci -q get owrtremote.main >/dev/null 2>&1; then
-		uci set owrtremote.main.admin_host="127.0.0.1"
-		uci set owrtremote.main.admin_port="$port"
-		uci commit owrtremote
+	TUNNEL_ADMIN_PORT="$(find_free_loopback_port)" || {
+		info "не нашёл свободный loopback-порт для отдельного uhttpd-инстанса, редирект-цикл придётся чинить вручную"
+		return 1
+	}
+
+	uci -q delete "uhttpd.${section}" 2>/dev/null || true
+	uci set "uhttpd.${section}=uhttpd"
+	uci set "uhttpd.${section}.listen_http=127.0.0.1:${TUNNEL_ADMIN_PORT}"
+	uci set "uhttpd.${section}.redirect_https=0"
+	uci set "uhttpd.${section}.home=$(uci -q get uhttpd.main.home || echo /www)"
+	uci set "uhttpd.${section}.cgi_prefix=$(uci -q get uhttpd.main.cgi_prefix || echo /cgi-bin)"
+	uci set "uhttpd.${section}.ubus_prefix=$(uci -q get uhttpd.main.ubus_prefix || echo /ubus)"
+	uci set "uhttpd.${section}.script_timeout=$(uci -q get uhttpd.main.script_timeout || echo 60)"
+	uci set "uhttpd.${section}.network_timeout=$(uci -q get uhttpd.main.network_timeout || echo 30)"
+	uci set "uhttpd.${section}.max_requests=$(uci -q get uhttpd.main.max_requests || echo 3)"
+	uci set "uhttpd.${section}.max_connections=$(uci -q get uhttpd.main.max_connections || echo 100)"
+	uci -q delete "uhttpd.${section}.lua_prefix" 2>/dev/null || true
+	lua_prefixes="$(uci -q get uhttpd.main.lua_prefix 2>/dev/null || true)"
+	for lp in $lua_prefixes; do
+		uci add_list "uhttpd.${section}.lua_prefix=$lp"
+	done
+	uci commit uhttpd
+	info "второй uhttpd-инстанс на 127.0.0.1:${TUNNEL_ADMIN_PORT} (только туннель, без redirect_https) — LAN-инстанс (0.0.0.0:80/443, redirect_https) не тронут."
+	"$uhttpd_bin" restart >/dev/null 2>&1 || true
+}
+
+# VodkinNET: живой инцидент 2026-09-08/10 (node-6/node-8) — раньше
+# смена admin_host/admin_port + рестарт агента происходили ЗДЕСЬ, ДО
+# install_owrt_remote_core (скачивание и атомарная замена бинарника
+# агента). Если install.sh выполнялся через встроенный SSH-веб-терминал
+# самой панели — то есть команды шли через тот же самый реверс-туннель,
+# который этот рестарт и обрывал, — рестарт разрывал СВОЮ ЖЕ SSH-сессию
+# раньше, чем скрипт успевал докачать остальные файлы. Два роутера
+# остались в наполовину установленном состоянии, self-heal не спас,
+# потому что сам агент не успел подняться корректно, чтобы его
+# запустить. Поэтому смена admin_host/admin_port и рестарт агента
+# ТЕПЕРЬ — это finalize_tunnel_admin_config(), вызывается САМОЙ ПОСЛЕДНЕЙ
+# строкой во всём файле, когда абсолютно всё остальное (бинарник агента,
+# watchdog, конфиг, финальная инструкция «Дальше») уже гарантированно
+# установлено и показано пользователю. Если этот последний рестарт всё
+# же оборвёт SSH-сессию — терять уже нечего, всё нужное уже на месте.
+finalize_tunnel_admin_config() {
+	local old_admin_host old_admin_port initd
+	[ -n "${TUNNEL_ADMIN_PORT:-}" ] || return 0
+	[ -f "$(target_path etc/config/owrtremote)" ] || return 0
+	uci -q get owrtremote.main >/dev/null 2>&1 || return 0
+
+	old_admin_host="$(uci -q get owrtremote.main.admin_host 2>/dev/null || echo '')"
+	old_admin_port="$(uci -q get owrtremote.main.admin_port 2>/dev/null || echo '')"
+	uci set owrtremote.main.admin_host="127.0.0.1"
+	uci set owrtremote.main.admin_port="$TUNNEL_ADMIN_PORT"
+	uci commit owrtremote
+
+	if [ "$old_admin_host" != "127.0.0.1" ] || [ "$old_admin_port" != "$TUNNEL_ADMIN_PORT" ]; then
+		initd="$(target_path etc/init.d/owrt-remote)"
+		if [ -x "$initd" ]; then
+			info "admin_host/admin_port изменились — перезапускаю owrt-remote (это последний шаг установки)."
+			( "$initd" restart >/dev/null 2>&1 & )
+		fi
 	fi
 }
-setup_tunnel_admin_uhttpd
 
+setup_tunnel_admin_uhttpd
 install_owrt_remote_core
 install_file_checked "usr/sbin/owrt-remote-watchdog" 0755
 install_config
@@ -538,3 +569,5 @@ cat <<'EOF'
   5. owrt-remote doctor
 
 EOF
+
+finalize_tunnel_admin_config
