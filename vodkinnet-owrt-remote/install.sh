@@ -493,24 +493,63 @@ setup_tunnel_admin_uhttpd() {
 # watchdog, конфиг, финальная инструкция «Дальше») уже гарантированно
 # установлено и показано пользователю. Если этот последний рестарт всё
 # же оборвёт SSH-сессию — терять уже нечего, всё нужное уже на месте.
+#
+# Дополнительно (по итогам того же инцидента): перед тем как вообще
+# трогать admin_host/admin_port, проверяем, что новый uhttpd-инстанс
+# реально слушает (через port_is_free — не через HTTP-статус, который
+# может путать 403/404 с реальной поломкой) и что сам агент физически
+# на месте и проходит sh -n. Если что-то не так — конфиг НЕ трогаем
+# вообще, рестарт отменяется, старые (рабочие) значения остаются как
+# были. Если всё в порядке — взводим CONFIG_MARKER с сохранёнными
+# старыми значениями, чтобы self-heal самого агента (см.
+# self_heal_check_config/rollback_tunnel_admin_config в
+# usr/sbin/owrt-remote) мог откатить это назад сам, без участия
+# человека, если турна после рестарта так и не поднимется.
 finalize_tunnel_admin_config() {
-	local old_admin_host old_admin_port initd
+	local old_admin_host old_admin_port initd agent_bin config_marker
 	[ -n "${TUNNEL_ADMIN_PORT:-}" ] || return 0
 	[ -f "$(target_path etc/config/owrtremote)" ] || return 0
 	uci -q get owrtremote.main >/dev/null 2>&1 || return 0
 
-	old_admin_host="$(uci -q get owrtremote.main.admin_host 2>/dev/null || echo '')"
-	old_admin_port="$(uci -q get owrtremote.main.admin_port 2>/dev/null || echo '')"
+	old_admin_host="$(uci -q get owrtremote.main.admin_host 2>/dev/null)" || old_admin_host="__UNSET__"
+	old_admin_port="$(uci -q get owrtremote.main.admin_port 2>/dev/null)" || old_admin_port="__UNSET__"
+
+	# Уже в нужном состоянии — идемпотентный повторный запуск, менять и
+	# рестартовать нечего.
+	if [ "$old_admin_host" = "127.0.0.1" ] && [ "$old_admin_port" = "$TUNNEL_ADMIN_PORT" ]; then
+		return 0
+	fi
+
+	if port_is_free "$TUNNEL_ADMIN_PORT"; then
+		info "второй uhttpd-инстанс на 127.0.0.1:${TUNNEL_ADMIN_PORT} не слушает — admin_host/admin_port НЕ трогаю, рестарт отменён. Проверьте uhttpd.owrt_remote_admin вручную."
+		return 1
+	fi
+
+	agent_bin="$(target_path usr/sbin/owrt-remote)"
+	if [ ! -x "$agent_bin" ]; then
+		info "агент ${agent_bin} отсутствует или не исполняемый — admin_host/admin_port НЕ трогаю, рестарт отменён."
+		return 1
+	fi
+	if ! sh -n "$agent_bin" 2>/dev/null; then
+		info "агент ${agent_bin} не проходит проверку синтаксиса (sh -n) — admin_host/admin_port НЕ трогаю, рестарт отменён."
+		return 1
+	fi
+
 	uci set owrtremote.main.admin_host="127.0.0.1"
 	uci set owrtremote.main.admin_port="$TUNNEL_ADMIN_PORT"
 	uci commit owrtremote
 
-	if [ "$old_admin_host" != "127.0.0.1" ] || [ "$old_admin_port" != "$TUNNEL_ADMIN_PORT" ]; then
-		initd="$(target_path etc/init.d/owrt-remote)"
-		if [ -x "$initd" ]; then
-			info "admin_host/admin_port изменились — перезапускаю owrt-remote (это последний шаг установки)."
-			( "$initd" restart >/dev/null 2>&1 & )
-		fi
+	initd="$(target_path etc/init.d/owrt-remote)"
+	if [ -x "$initd" ]; then
+		config_marker="$(target_path etc/owrt-remote-config-pending)"
+		{
+			date +%s 2>/dev/null || echo 0
+			printf '%s\n' "$old_admin_host"
+			printf '%s\n' "$old_admin_port"
+		} > "$config_marker" 2>/dev/null
+
+		info "admin_host/admin_port изменились — перезапускаю owrt-remote (это последний шаг установки). Если туннель не поднимется, self-heal сам откатит это назад через rollback_grace_seconds."
+		( "$initd" restart >/dev/null 2>&1 & )
 	fi
 }
 
