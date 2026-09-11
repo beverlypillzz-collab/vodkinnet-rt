@@ -11,11 +11,18 @@ RestartSec=3
 # VodkinNET: НЕ root. Единственное root-действие (рестарт netcraze-remote-xray)
 # идёт через узкое sudoers-правило (см. netcraze-remote.sudoers), не через
 # полные права самого процесса — это интернет-facing HTTP-сервер.
+#
+# /run/sudo добавлен в ReadWritePaths — найдено на практике: sudo сам
+# пытается писать туда свой файл-"тикет" (кеш успешной аутентификации),
+# и ProtectSystem=strict без явного разрешения делает ВЕСЬ /run
+# доступным только для чтения, из-за чего sudo падал с "unable to open
+# /run/sudo/ts/999: Read-only file system" при попытке рестарта Xray
+# через кнопку "Рестарт Xray VPS"/"Обновить Xray CFG" в панели.
 User=netcraze-remote
 Group=netcraze-remote
 WorkingDirectory=/opt/netcraze-remote
 ProtectSystem=strict
-ReadWritePaths=/var/lib/netcraze-remote /etc/netcraze-remote
+ReadWritePaths=/var/lib/netcraze-remote /etc/netcraze-remote /run/sudo
 
 [Install]
 WantedBy=multi-user.target
