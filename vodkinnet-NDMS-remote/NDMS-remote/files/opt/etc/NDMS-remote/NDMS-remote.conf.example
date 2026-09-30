@@ -1,7 +1,7 @@
-# netcraze-remote — конфиг агента (Keenetic/KNDMS, Entware)
+# NDMS-remote — конфиг агента (Keenetic/KNDMS, Entware)
 #
 # Это обычный shell key="value" файл, никакого uci. Правь через vi/nano,
-# или удалённо через SMB-шару Entware (\\<IP роутера>\<метка>\opt\etc\netcraze-remote\)
+# или удалённо через SMB-шару Entware (\\<IP роутера>\<метка>\opt\etc\NDMS-remote\)
 # как уже привычно для этого устройства.
 #
 # ПРОЩЕ ВСЕГО: не заполнять это вручную, а скопировать готовый блок целиком
@@ -10,14 +10,14 @@
 # его сервисов.
 #
 # После заполнения — запусти:
-#   /opt/etc/init.d/S99netcraze-remote start
+#   /opt/etc/init.d/S99NDMS-remote start
 
 # --- идентификация роутера ---
-ROUTER_ID="netcraze-office"
+ROUTER_ID="NDMS-office"
 ROUTER_NAME="Netcraze GIGA (офис)"
 ENABLED="1"
 
-# --- Hub (панель netcraze-remote на VPS) ---
+# --- Hub (панель NDMS-remote на VPS) ---
 HUB_URL="https://REPLACE_ME.example.com"
 HUB_TOKEN="REPLACE_ME"
 
@@ -33,10 +33,10 @@ TLS_SNI="REPLACE_ME.example.com"
 
 # --- xray ---
 # Оставь пустым — агент сам найдёт бинарь (или поставит через opkg).
-# ВАЖНО: это ОТДЕЛЬНЫЙ процесс от XKeen. netcraze-remote никогда не трогает
+# ВАЖНО: это ОТДЕЛЬНЫЙ процесс от XKeen. NDMS-remote никогда не трогает
 # /opt/etc/xray/configs/ (конфиги XKeen) — свой конфиг ниже, свой процесс.
 XRAY_BIN=""
-XRAY_CONFIG="/opt/etc/netcraze-remote/xray-client.json"
+XRAY_CONFIG="/opt/etc/NDMS-remote/xray-client.json"
 
 # --- heartbeat ---
 HEARTBEAT_INTERVAL="30"
@@ -50,7 +50,7 @@ HEARTBEAT_INTERVAL="30"
 #
 # Ниже — только 2 дефолтных сервиса, которые Hub создаёт автоматически при
 # добавлении роутера. Если добавишь ещё сервисы в Hub — они появятся здесь
-# при следующем копировании блока конфига (или через `netcraze-remote
+# при следующем копировании блока конфига (или через `NDMS-remote
 # pull-config`, который перетянет актуальный список автоматически).
 SERVICE_COUNT="2"
 

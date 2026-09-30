@@ -33,14 +33,14 @@ except Exception:
 
 
 APP_NAME = "VodkinNet RT Hub"
-RAW_REPO_BASE = "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote"
-STATE_DIR = Path(os.environ.get("NETCRAZE_REMOTE_STATE_DIR", "/var/lib/netcraze-remote"))
-DB_PATH = Path(os.environ.get("NETCRAZE_REMOTE_DB", str(STATE_DIR / "hub.db")))
+RAW_REPO_BASE = "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-NDMS-remote/NDMS-remote"
+STATE_DIR = Path(os.environ.get("NDMS_REMOTE_STATE_DIR", "/var/lib/NDMS-remote"))
+DB_PATH = Path(os.environ.get("NDMS_REMOTE_DB", str(STATE_DIR / "hub.db")))
 # VodkinNET: статика (xterm.js/css) лежит рядом с самим скриптом — тем же
-# путём, что и install-vps.sh кладёт netcraze-remote-hub.py, только в
+# путём, что и install-vps.sh кладёт NDMS-remote-hub.py, только в
 # подпапке static/. Переопределяемо через env на случай нестандартной
 # раскладки.
-STATIC_DIR = Path(os.environ.get("NETCRAZE_REMOTE_STATIC_DIR", str(Path(__file__).resolve().parent / "static")))
+STATIC_DIR = Path(os.environ.get("NDMS_REMOTE_STATIC_DIR", str(Path(__file__).resolve().parent / "static")))
 AUTH_FILE = STATE_DIR / "hub-auth.json"
 SESSION_TOKEN_FILE = STATE_DIR / "hub-session.token"
 SESSIONS_FILE = STATE_DIR / "hub-sessions.json"
@@ -51,15 +51,15 @@ VAPID_PUBLIC_KEY_FILE = STATE_DIR / "hub-vapid-public.txt"
 BOOT_ID_FILE = STATE_DIR / "hub-boot.id"
 AGENT_TOKEN_FILE = STATE_DIR / "agent.token"
 ACME_WEBROOT = STATE_DIR / "acme-webroot"
-ONLINE_AFTER_SECONDS = int(os.environ.get("NETCRAZE_REMOTE_ONLINE_AFTER", "75"))
-DEFAULT_VLESS_PORT = int(os.environ.get("NETCRAZE_REMOTE_VLESS_PORT", "8444"))
+ONLINE_AFTER_SECONDS = int(os.environ.get("NDMS_REMOTE_ONLINE_AFTER", "75"))
+DEFAULT_VLESS_PORT = int(os.environ.get("NDMS_REMOTE_VLESS_PORT", "8444"))
 # --- VodkinNET: TLS on the reverse channel ---------------------------------
 # Empty REVERSE_TLS_CERT keeps the legacy plaintext behaviour (security:none).
 # Set all three via env at install time to encrypt the router<->VPS channel so
 # the VLESS UUID and management traffic never travel in cleartext.
-REVERSE_TLS_CERT = os.environ.get("NETCRAZE_REMOTE_TLS_CERT", "").strip()
-REVERSE_TLS_KEY = os.environ.get("NETCRAZE_REMOTE_TLS_KEY", "").strip()
-REVERSE_TLS_SNI = os.environ.get("NETCRAZE_REMOTE_TLS_SNI", "").strip()
+REVERSE_TLS_CERT = os.environ.get("NDMS_REMOTE_TLS_CERT", "").strip()
+REVERSE_TLS_KEY = os.environ.get("NDMS_REMOTE_TLS_KEY", "").strip()
+REVERSE_TLS_SNI = os.environ.get("NDMS_REMOTE_TLS_SNI", "").strip()
 
 
 def reverse_stream_settings():
@@ -80,16 +80,16 @@ def reverse_stream_settings():
             },
         }
     return {"network": "tcp", "security": "none"}
-REQUEST_QUEUE_SIZE = int(os.environ.get("NETCRAZE_REMOTE_REQUEST_QUEUE_SIZE", "128"))
-ROUTER_PROXY_LIMIT = max(1, int(os.environ.get("NETCRAZE_REMOTE_ROUTER_PROXY_LIMIT", "4")))
-PROXY_TIMEOUT = float(os.environ.get("NETCRAZE_REMOTE_PROXY_TIMEOUT", "25"))
-STATIC_CACHE_TTL = int(os.environ.get("NETCRAZE_REMOTE_STATIC_CACHE_TTL", "3600"))
-STATIC_CACHE_MAX_BYTES = int(os.environ.get("NETCRAZE_REMOTE_STATIC_CACHE_MAX_BYTES", str(8 * 1024 * 1024)))
+REQUEST_QUEUE_SIZE = int(os.environ.get("NDMS_REMOTE_REQUEST_QUEUE_SIZE", "128"))
+ROUTER_PROXY_LIMIT = max(1, int(os.environ.get("NDMS_REMOTE_ROUTER_PROXY_LIMIT", "4")))
+PROXY_TIMEOUT = float(os.environ.get("NDMS_REMOTE_PROXY_TIMEOUT", "25"))
+STATIC_CACHE_TTL = int(os.environ.get("NDMS_REMOTE_STATIC_CACHE_TTL", "3600"))
+STATIC_CACHE_MAX_BYTES = int(os.environ.get("NDMS_REMOTE_STATIC_CACHE_MAX_BYTES", str(8 * 1024 * 1024)))
 PBKDF2_ITERATIONS = 240000
 MIN_PASSWORD_LENGTH = 4
-SESSION_COOKIE = "netcraze_remote_session"
-ROUTER_COOKIE = "netcraze_remote_router"
-SESSION_TTL_SECONDS = int(os.environ.get("NETCRAZE_REMOTE_SESSION_TTL", str(30 * 24 * 60 * 60)))
+SESSION_COOKIE = "NDMS_remote_session"
+ROUTER_COOKIE = "NDMS_remote_router"
+SESSION_TTL_SECONDS = int(os.environ.get("NDMS_REMOTE_SESSION_TTL", str(30 * 24 * 60 * 60)))
 CAPTCHA_TTL_SECONDS = 600
 # VodkinNET: код капчи вставляется в HTML открытым текстом (см.
 # captcha_challenge()/login_html ниже) — это защищает от подделки
@@ -97,8 +97,8 @@ CAPTCHA_TTL_SECONDS = 600
 # скрипта, который просто читает код из того же HTML-ответа и тут же
 # отправляет его обратно. Реальной защиты от брутфорса капча сама по
 # себе не даёт — добавлен настоящий rate-limit по IP поверх неё.
-LOGIN_MAX_ATTEMPTS = int(os.environ.get("NETCRAZE_REMOTE_LOGIN_MAX_ATTEMPTS", "5"))
-LOGIN_LOCKOUT_SECONDS = int(os.environ.get("NETCRAZE_REMOTE_LOGIN_LOCKOUT_SECONDS", str(5 * 60)))
+LOGIN_MAX_ATTEMPTS = int(os.environ.get("NDMS_REMOTE_LOGIN_MAX_ATTEMPTS", "5"))
+LOGIN_LOCKOUT_SECONDS = int(os.environ.get("NDMS_REMOTE_LOGIN_LOCKOUT_SECONDS", str(5 * 60)))
 LOGIN_ATTEMPTS = {}
 LOGIN_ATTEMPTS_LOCK = threading.Lock()
 NOTIFICATIONS_MAX = 220
@@ -225,7 +225,7 @@ def read_or_make_token(path):
 
 
 def agent_token():
-    return os.environ.get("NETCRAZE_REMOTE_AGENT_TOKEN") or read_or_make_token(AGENT_TOKEN_FILE)
+    return os.environ.get("NDMS_REMOTE_AGENT_TOKEN") or read_or_make_token(AGENT_TOKEN_FILE)
 
 
 def session_token():
@@ -273,8 +273,8 @@ def load_auth():
     ensure_state()
     if AUTH_FILE.exists():
         return json.loads(AUTH_FILE.read_text(encoding="utf-8"))
-    username = os.environ.get("NETCRAZE_REMOTE_ADMIN_USER", "admin")
-    password = os.environ.get("NETCRAZE_REMOTE_ADMIN_PASSWORD") or "admin"
+    username = os.environ.get("NDMS_REMOTE_ADMIN_USER", "admin")
+    password = os.environ.get("NDMS_REMOTE_ADMIN_PASSWORD") or "admin"
     data = save_auth(username, password)
     login_hint = STATE_DIR / "hub-login.txt"
     login_hint.write_text(
@@ -726,7 +726,7 @@ def send_web_push(subscription, payload):
             },
             data=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
             vapid_private_key=str(VAPID_PRIVATE_KEY_FILE),
-            vapid_claims={"sub": os.environ.get("NETCRAZE_REMOTE_VAPID_SUB", "mailto:admin@localhost")},
+            vapid_claims={"sub": os.environ.get("NDMS_REMOTE_VAPID_SUB", "mailto:admin@localhost")},
             timeout=10,
             ttl=86400,
         )
@@ -783,7 +783,7 @@ self.addEventListener('push', event => {
   const title = data.title || 'VodkinNet RT Hub';
   const options = {
     body: data.body || '',
-    tag: data.tag || 'netcraze-remote-hub',
+    tag: data.tag || 'NDMS-remote-hub',
     renotify: true,
     data: {url: data.url || '/'},
     badge: data.badge || undefined,
@@ -1047,7 +1047,7 @@ def connect(db_path=DB_PATH):
     # файл БД с правами по умолчанию (обычно 0644, читаемо любым локальным
     # пользователем на VPS), в то время как остальные чувствительные файлы
     # в этом модуле (AUTH_FILE/SESSION_TOKEN_FILE/VAPID-ключи) уже 0600.
-    # При переносе owrt-remote-hub.py в netcraze-remote-hub.py этот фикс
+    # При переносе owrt-remote-hub.py в NDMS-remote-hub.py этот фикс
     # не попал — найдено при финальном security-аудите 2026-08-23.
     try:
         os.chmod(db_path, 0o600)
@@ -1081,9 +1081,9 @@ def init_db(conn):
         raise SystemExit(
             "БД в несовместимом (старом) формате: таблица 'routers' существует, "
             "но без колонок этой версии (entry_port/vless_uuid/admin_host). "
-            "Это база от старой/другой версии netcraze-remote. Тестовые данные "
+            "Это база от старой/другой версии NDMS-remote. Тестовые данные "
             "не жалко — удали файл БД и запусти установку заново:\n"
-            f"  systemctl stop netcraze-remote-hub netcraze-remote-xray 2>/dev/null\n"
+            f"  systemctl stop NDMS-remote-hub NDMS-remote-xray 2>/dev/null\n"
             f"  rm -f {DB_PATH}\n"
             "  (затем повтори install-vps.sh)"
         )
@@ -1418,7 +1418,7 @@ def make_server_xray_config(rows, listen_host="0.0.0.0", listen_port=DEFAULT_VLE
     clients = []
     inbounds = [
         {
-            "tag": "netcraze-remote-vless",
+            "tag": "NDMS-remote-vless",
             "listen": listen_host,
             "port": int(listen_port),
             "protocol": "vless",
@@ -1449,7 +1449,7 @@ def make_server_xray_config(rows, listen_host="0.0.0.0", listen_port=DEFAULT_VLE
         if entry_port > 0:
             client = {
                 "id": row["vless_uuid"],
-                "email": f"{router_id}@netcraze-remote",
+                "email": f"{router_id}@NDMS-remote",
                 "reverse": {
                     "tag": reverse_out,
                 },
@@ -1480,7 +1480,7 @@ def make_server_xray_config(rows, listen_host="0.0.0.0", listen_port=DEFAULT_VLE
         if ssh_entry_port > 0:
             ssh_client = {
                 "id": row["ssh_vless_uuid"],
-                "email": f"{router_id}-ssh@netcraze-remote",
+                "email": f"{router_id}-ssh@NDMS-remote",
                 "reverse": {
                     "tag": ssh_reverse_out,
                 },
@@ -1581,24 +1581,24 @@ def make_router_xray_config(row):
                 }
             ]
         },
-        "remarks": f"netcraze-remote client for {row['id']}",
+        "remarks": f"NDMS-remote client for {row['id']}",
     }
 
 
 def _systemctl_restart_cmd(service):
     # VodkinNET: Hub-процесс работает НЕ от root (см. install-vps.sh —
     # отдельный системный пользователь). Единственное root-действие —
-    # рестарт netcraze-remote-xray — идёт через узкое sudoers-правило на
+    # рестарт NDMS-remote-xray — идёт через узкое sudoers-правило на
     # один конкретный systemctl-вызов, а не через полные права процесса.
     cmd = ["systemctl", "restart", service]
-    if os.environ.get("NETCRAZE_REMOTE_SUDO_RESTART", "1") != "0":
+    if os.environ.get("NDMS_REMOTE_SUDO_RESTART", "1") != "0":
         cmd = ["sudo", "-n"] + cmd
     return cmd
 
 
 def reload_vps_xray(db_path=DB_PATH):
-    out = Path(os.environ.get("NETCRAZE_REMOTE_XRAY_CONFIG", "/etc/netcraze-remote/xray.json"))
-    service = os.environ.get("NETCRAZE_REMOTE_XRAY_SERVICE", "netcraze-remote-xray")
+    out = Path(os.environ.get("NDMS_REMOTE_XRAY_CONFIG", "/etc/NDMS-remote/xray.json"))
+    service = os.environ.get("NDMS_REMOTE_XRAY_SERVICE", "NDMS-remote-xray")
     with connect(db_path) as conn:
         init_db(conn)
         rows = list_router_rows(conn)
@@ -1624,7 +1624,7 @@ def reload_vps_xray(db_path=DB_PATH):
 
 
 def restart_vps_xray():
-    service = os.environ.get("NETCRAZE_REMOTE_XRAY_SERVICE", "netcraze-remote-xray")
+    service = os.environ.get("NDMS_REMOTE_XRAY_SERVICE", "NDMS-remote-xray")
     result = subprocess.run(
         _systemctl_restart_cmd(service),
         text=True,
@@ -1680,7 +1680,7 @@ def make_router_conf(row, hub_url):
         # прописанный несуществующий путь стоил многочасовой отладки —
         # не повторяем эту ошибку здесь.
         'XRAY_BIN=""',
-        'XRAY_CONFIG="/opt/etc/netcraze-remote/xray-client.json"',
+        'XRAY_CONFIG="/opt/etc/NDMS-remote/xray-client.json"',
         f'VPS_HOST="{sh_quote(row["vps_host"])}"',
         f'VPS_PORT="{int(row["vless_port"])}"',
         f'TLS_SNI="{sh_quote(row["vps_host"])}"',
@@ -1690,7 +1690,7 @@ def make_router_conf(row, hub_url):
     # VodkinNET: admin (веб-морда) и ssh — независимо опциональные каналы.
     # Пустой VLESS_UUID/SSH_VLESS_UUID — явный сигнал агенту "канал
     # отключён, не строить для него outbound вообще" (см. render_client_config
-    # в files/opt/sbin/netcraze-remote). Нужно для случаев вроде "управляем
+    # в files/opt/sbin/NDMS-remote). Нужно для случаев вроде "управляем
     # только по SSH (Entware), веб-морду NDMS через Hub не выдаём вообще".
     if admin_enabled:
         lines += [
@@ -1718,7 +1718,7 @@ def _drop_privileges_to(username, env):
     """VodkinNET: drop from root to an unprivileged user before exec'ing a
     shell. Used by the VPS terminal feature so clicking "Terminal VPS" in the
     panel no longer hands out an unrestricted root shell on the Hub server -
-    only the account named by NETCRAZE_REMOTE_VPS_SHELL_USER (must still `sudo`
+    only the account named by NDMS_REMOTE_VPS_SHELL_USER (must still `sudo`
     for anything privileged, same as a normal admin session would).
     Must be called in the forked child, before execvpe - order matters:
     resolve groups/gid while still root, then setgid, then setuid last.
@@ -1757,7 +1757,7 @@ def clean_forward_cookie(cookie_header):
         if not chunk.strip():
             continue
         if (
-            chunk.strip().startswith("netcraze_remote_admin=")
+            chunk.strip().startswith("NDMS_remote_admin=")
             or chunk.strip().startswith(f"{SESSION_COOKIE}=")
             or chunk.strip().startswith(f"{ROUTER_COOKIE}=")
         ):
@@ -1784,17 +1784,17 @@ def vps_terminal_commands(host):
         {
             "title": "Обновить Hub",
             "note": "Свежий hub.py из main + restart сервиса",
-            "command": f'v=$(date +%s); curl -fsSL -o /opt/netcraze-remote/netcraze-remote-hub.py "{RAW_REPO_BASE}/vps/netcraze-remote-hub.py?v=$v" && chmod +x /opt/netcraze-remote/netcraze-remote-hub.py && systemctl restart netcraze-remote-hub && systemctl status netcraze-remote-hub --no-pager -l',
+            "command": f'v=$(date +%s); curl -fsSL -o /opt/NDMS-remote/NDMS-remote-hub.py "{RAW_REPO_BASE}/vps/NDMS-remote-hub.py?v=$v" && chmod +x /opt/NDMS-remote/NDMS-remote-hub.py && systemctl restart NDMS-remote-hub && systemctl status NDMS-remote-hub --no-pager -l',
         },
         {
             "title": "Статус Hub",
-            "note": "Проверка сервиса netcraze-remote",
-            "command": "systemctl status netcraze-remote --no-pager -l",
+            "note": "Проверка сервиса NDMS-remote",
+            "command": "systemctl status NDMS-remote --no-pager -l",
         },
         {
             "title": "Логи Hub",
             "note": "Последние строки journald по Hub",
-            "command": "journalctl -u netcraze-remote -n 80 --no-pager -l",
+            "command": "journalctl -u NDMS-remote -n 80 --no-pager -l",
         },
         {
             "title": "Проверка портов",
@@ -1846,7 +1846,7 @@ def vps_quick_commands_html(host):
   <section class="quickPanel">
     <div class="quickHead">
       <h2>Быстрые команды</h2>
-      <p>Команды взяты из репозитория luci-app-netcraze-remote. Можно копировать или сразу отправлять в VPS terminal.</p>
+      <p>Команды взяты из репозитория luci-app-NDMS-remote. Можно копировать или сразу отправлять в VPS terminal.</p>
     </div>
     <div class="quickGrid">
 {joined}
@@ -1959,8 +1959,8 @@ def dashboard_html(routers, username, sessions=None, notifications=None):
     safe_username = html.escape(username, quote=True)
     # VodkinNET: optional branded link in the header, sourced from env so no
     # domain/URL is hardcoded in the public fork. Empty by default -> no badge.
-    brand_url = os.environ.get("NETCRAZE_REMOTE_BRAND_URL", "").strip()
-    brand_name = os.environ.get("NETCRAZE_REMOTE_BRAND_NAME", "").strip()
+    brand_url = os.environ.get("NDMS_REMOTE_BRAND_URL", "").strip()
+    brand_name = os.environ.get("NDMS_REMOTE_BRAND_NAME", "").strip()
     if brand_url and brand_name:
         brand_link_html = (
             f'<a class="badge nethavenTop" href="{html.escape(brand_url, quote=True)}" '
@@ -3514,7 +3514,7 @@ class App:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "netcraze-remote-hub/1.0"
+    server_version = "NDMS-remote-hub/1.0"
     protocol_version = "HTTP/1.1"
 
     @property
@@ -3896,10 +3896,10 @@ class Handler(BaseHTTPRequestHandler):
         # user the Hub daemon itself runs as (root, per install_xray_service/
         # the Hub's own systemd unit) - meaning clicking "Terminal VPS" in the
         # panel handed out an unrestricted root shell. Set
-        # NETCRAZE_REMOTE_VPS_SHELL_USER to a hardened admin account to have this
+        # NDMS_REMOTE_VPS_SHELL_USER to a hardened admin account to have this
         # terminal drop to that user instead; anything privileged then still
         # needs an explicit sudo, same as a normal SSH session would.
-        run_as_user = os.environ.get("NETCRAZE_REMOTE_VPS_SHELL_USER", "").strip()
+        run_as_user = os.environ.get("NDMS_REMOTE_VPS_SHELL_USER", "").strip()
         shell = env.get("SHELL", "")
         if not shell:
             shell = "/bin/bash" if Path("/bin/bash").exists() else "/bin/sh"
@@ -4880,7 +4880,7 @@ def protect_luci_resource_root(text):
     protected = []
 
     def protect_value(match):
-        token = f"__NETCRAZE_REMOTE_LUCI_RESOURCE_{len(protected)}__"
+        token = f"__NDMS_REMOTE_LUCI_RESOURCE_{len(protected)}__"
         protected.append(match.group(0))
         return token
 
@@ -4895,7 +4895,7 @@ def protect_luci_resource_root(text):
 
 def restore_luci_resource_root(text, protected):
     for index, value in enumerate(protected):
-        text = text.replace(f"__NETCRAZE_REMOTE_LUCI_RESOURCE_{index}__", value)
+        text = text.replace(f"__NDMS_REMOTE_LUCI_RESOURCE_{index}__", value)
     return text
 
 
@@ -4936,8 +4936,8 @@ def rewrite_remaining_luci_roots(text, prefix):
     escaped_prefix = prefix.replace("/", "\\/")
     for root in roots:
         key = root.strip("/").replace("/", "_")
-        marker = f"__NETCRAZE_REMOTE_RAW_ROOT_{key}__"
-        escaped_marker = f"__NETCRAZE_REMOTE_ESC_ROOT_{key}__"
+        marker = f"__NDMS_REMOTE_RAW_ROOT_{key}__"
+        escaped_marker = f"__NDMS_REMOTE_ESC_ROOT_{key}__"
 
         escaped_root = root.replace("/", "\\/")
         escaped_prefixed = f"{escaped_prefix}{escaped_root}"
@@ -5140,7 +5140,7 @@ def cmd_print_router_config(args):
         row = get_router(conn, args.id)
     if not row:
         raise SystemExit(f"router not found: {args.id}")
-    hub_url = args.hub_url or os.environ.get("NETCRAZE_REMOTE_PUBLIC_URL") or f"http://{args.vps_host}:{args.port}"
+    hub_url = args.hub_url or os.environ.get("NDMS_REMOTE_PUBLIC_URL") or f"http://{args.vps_host}:{args.port}"
     print(make_router_conf(row, hub_url), end="")
 
 
@@ -5200,9 +5200,9 @@ def cmd_serve(args):
     # health endpoint and the plain-HTTP app. It must never be reachable from the
     # outside — only nginx (TLS/443) and the loopback proxy talk to it. Force it
     # to loopback even if --host is 0.0.0.0 for the ACME/redirect port. Override
-    # with NETCRAZE_REMOTE_RAW_PUBLIC=1 only if you really know what you're doing.
+    # with NDMS_REMOTE_RAW_PUBLIC=1 only if you really know what you're doing.
     raw_host = args.host
-    if os.environ.get("NETCRAZE_REMOTE_RAW_PUBLIC", "0") != "1":
+    if os.environ.get("NDMS_REMOTE_RAW_PUBLIC", "0") != "1":
         raw_host = "127.0.0.1"
     server = make_http_server(app, raw_host, args.port)
     extra_servers = []
@@ -5307,13 +5307,13 @@ def parser():
     ow.set_defaults(func=cmd_print_router_config)
 
     serve = sub.add_parser("serve", help="run web dashboard")
-    serve.add_argument("--host", default=os.environ.get("NETCRAZE_REMOTE_BIND", "0.0.0.0"))
-    serve.add_argument("--port", type=int, default=int(os.environ.get("NETCRAZE_REMOTE_PORT", "8099")))
-    serve.add_argument("--extra-ports", default=os.environ.get("NETCRAZE_REMOTE_EXTRA_PORTS", ""))
-    serve.add_argument("--tls-ports", default=os.environ.get("NETCRAZE_REMOTE_TLS_PORTS", ""))
-    serve.add_argument("--tls-cert", default=os.environ.get("NETCRAZE_REMOTE_TLS_CERT", ""))
-    serve.add_argument("--tls-key", default=os.environ.get("NETCRAZE_REMOTE_TLS_KEY", ""))
-    serve.add_argument("--public-url", default=os.environ.get("NETCRAZE_REMOTE_PUBLIC_URL", ""))
+    serve.add_argument("--host", default=os.environ.get("NDMS_REMOTE_BIND", "0.0.0.0"))
+    serve.add_argument("--port", type=int, default=int(os.environ.get("NDMS_REMOTE_PORT", "8099")))
+    serve.add_argument("--extra-ports", default=os.environ.get("NDMS_REMOTE_EXTRA_PORTS", ""))
+    serve.add_argument("--tls-ports", default=os.environ.get("NDMS_REMOTE_TLS_PORTS", ""))
+    serve.add_argument("--tls-cert", default=os.environ.get("NDMS_REMOTE_TLS_CERT", ""))
+    serve.add_argument("--tls-key", default=os.environ.get("NDMS_REMOTE_TLS_KEY", ""))
+    serve.add_argument("--public-url", default=os.environ.get("NDMS_REMOTE_PUBLIC_URL", ""))
     serve.set_defaults(func=cmd_serve)
 
     return p

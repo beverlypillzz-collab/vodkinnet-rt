@@ -3,7 +3,7 @@
 Удалённый доступ к OpenWrt-роутерам (Cudy и т.п.) через свой VPS —
 реверс-туннель, без проброса портов, работает даже за CGNAT.
 
-Часть семьи `vodkinnet-rt` — сосед `vodkinnet-keenetic/netcraze-remote`
+Часть семьи `vodkinnet-rt` — сосед `vodkinnet-NDMS-remote/netcraze-remote`
 (тот же принцип для Keenetic/Entware-флота) на одном VPS `panel-vodkinnet`.
 
 ## Архитектура

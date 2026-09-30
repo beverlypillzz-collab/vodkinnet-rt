@@ -1,5 +1,5 @@
 #!/bin/sh
-# netcraze-remote — агент реверс-туннеля для Keenetic/KNDMS (Entware).
+# NDMS-remote — агент реверс-туннеля для Keenetic/KNDMS (Entware).
 #
 # v3: точный порт vodkinnet-owrt-remote (та же схема полей admin_*/ssh_*,
 # тот же механизм детекта Xray через /proc, те же метрики RAM/Flash/
@@ -13,10 +13,10 @@
 
 export PATH="/opt/sbin:/opt/bin:/bin:/sbin:/usr/bin:/usr/sbin:${PATH:-}"
 
-CONF="/opt/etc/netcraze-remote/netcraze-remote.conf"
-STATE_DIR="/opt/var/run/netcraze-remote"
+CONF="/opt/etc/NDMS-remote/NDMS-remote.conf"
+STATE_DIR="/opt/var/run/NDMS-remote"
 PID_HB="$STATE_DIR/heartbeat.pid"
-LOG_FILE="/opt/var/log/netcraze-remote.log"
+LOG_FILE="/opt/var/log/NDMS-remote.log"
 
 # VodkinNET: rollback-механизм после обновления агента (перенесено из
 # vodkinnet-owrt-remote, см. changelog там за 2026-08-23 — три живых
@@ -27,10 +27,10 @@ LOG_FILE="/opt/var/log/netcraze-remote.log"
 # start_heartbeat), поэтому Баг#1 из owrt-remote (procd не перезапускал
 # один из двух инстансов) здесь структурно невозможен — инстанс тут
 # один, управляется полностью вручную самим скриптом.
-AGENT_BIN="/opt/sbin/netcraze-remote"
+AGENT_BIN="/opt/sbin/NDMS-remote"
 AGENT_BAK="${AGENT_BIN}.bak"
-UPDATE_MARKER="/opt/etc/netcraze-remote/update-pending"
-ROLLBACK_LOG="/opt/var/log/netcraze-remote-rollback.log"
+UPDATE_MARKER="/opt/etc/NDMS-remote/update-pending"
+ROLLBACK_LOG="/opt/var/log/NDMS-remote-rollback.log"
 
 if [ -t 1 ]; then
 	C_RED='\033[0;31m'; C_GREEN='\033[0;32m'; C_YELLOW='\033[1;33m'; C_NC='\033[0m'
@@ -46,22 +46,22 @@ die()  { printf '%b[!!] ОШИБКА:%b %s\n' "$C_RED" "$C_NC" "$*" >&2; exit 1;
 usage() {
 	cat <<'EOF'
 Использование:
-  netcraze-remote status
-  netcraze-remote doctor
-  netcraze-remote render-client [--stdout]
-  netcraze-remote run                 # foreground, вызывается из init-скрипта
-  netcraze-remote start / stop / restart
-  netcraze-remote heartbeat
-  netcraze-remote heartbeat-loop
-  netcraze-remote pull-config         # перетянуть конфиг с Hub по HUB_TOKEN
-  netcraze-remote update /path/to/new/netcraze-remote
-  netcraze-remote rollback
-  netcraze-remote tunnel-check
+  NDMS-remote status
+  NDMS-remote doctor
+  NDMS-remote render-client [--stdout]
+  NDMS-remote run                 # foreground, вызывается из init-скрипта
+  NDMS-remote start / stop / restart
+  NDMS-remote heartbeat
+  NDMS-remote heartbeat-loop
+  NDMS-remote pull-config         # перетянуть конфиг с Hub по HUB_TOKEN
+  NDMS-remote update /path/to/new/NDMS-remote
+  NDMS-remote rollback
+  NDMS-remote tunnel-check
 
-Настройки лежат в /opt/etc/netcraze-remote/netcraze-remote.conf
+Настройки лежат в /opt/etc/NDMS-remote/NDMS-remote.conf
 
 update:
-  Бэкапит текущий /opt/sbin/netcraze-remote в .bak, ставит новый файл,
+  Бэкапит текущий /opt/sbin/NDMS-remote в .bak, ставит новый файл,
   взводит маркер и рестартит агент. heartbeat-loop сам проверит через
   rollback_grace_seconds (в конфиге, по умолчанию 30с), поднялся ли
   реальный туннель, и откатит бинарник назад, если нет.
@@ -94,7 +94,7 @@ entware_ok() {
 }
 
 require_entware() {
-	entware_ok || die "Entware не найден или не работает по-настоящему (opkg/opkg.conf/точка монтирования /opt) — см. netcraze_vpn_setup_summary.md про баг 'disk is unchanged'"
+	entware_ok || die "Entware не найден или не работает по-настоящему (opkg/opkg.conf/точка монтирования /opt) — см. NDMS_vpn_setup_summary.md про баг 'disk is unchanged'"
 }
 
 # --- конфиг: обычный key="value" файл (на KNDMS нет uci) ------------------
@@ -352,7 +352,7 @@ EOF_VPSIP
 # агент бездумно его подхватил вместо своей отдельной, проверенной
 # копии). Полностью независимая, никак не пересекающаяся с чем-либо ещё
 # на устройстве копия — не трогаем и не путаем с чужими установками.
-NETCRAZE_XRAY_BIN="/opt/sbin/netcraze-remote-xray"
+NDMS_XRAY_BIN="/opt/sbin/NDMS-remote-xray"
 
 xray_bin_path() {
 	local configured
@@ -361,8 +361,8 @@ xray_bin_path() {
 		printf '%s' "$configured"
 		return 0
 	fi
-	if [ -x "$NETCRAZE_XRAY_BIN" ] && xray_version_matches "$NETCRAZE_XRAY_BIN"; then
-		printf '%s' "$NETCRAZE_XRAY_BIN"
+	if [ -x "$NDMS_XRAY_BIN" ] && xray_version_matches "$NDMS_XRAY_BIN"; then
+		printf '%s' "$NDMS_XRAY_BIN"
 		return 0
 	fi
 	return 1
@@ -464,7 +464,7 @@ try_install_xray_asset() {
 	# первым, раз для MIPS он чаще нужен) и берём первый, который реально
 	# запускается и отвечает нужной версией.
 	unzip -o -q "$tmp_zip" -d "${TMPDIR:-/opt/tmp}/xray-release-extracted" xray xray_softfloat 2>/dev/null
-	mkdir -p "$(dirname "$NETCRAZE_XRAY_BIN")"
+	mkdir -p "$(dirname "$NDMS_XRAY_BIN")"
 
 	local candidate installed=0 src
 	for candidate in xray_softfloat xray; do
@@ -472,8 +472,8 @@ try_install_xray_asset() {
 		[ -s "$src" ] || continue
 		chmod +x "$src"
 		if xray_version_matches "$src"; then
-			mv -f "$src" "$NETCRAZE_XRAY_BIN"
-			chmod +x "$NETCRAZE_XRAY_BIN"
+			mv -f "$src" "$NDMS_XRAY_BIN"
+			chmod +x "$NDMS_XRAY_BIN"
 			installed=1
 			break
 		fi
@@ -492,7 +492,7 @@ ensure_xray_available() {
 	log "Нужна отдельная копия Xray-core v${PINNED_XRAY_VERSION} для агента (не найдена или не той версии) — качаю ${asset} с GitHub..."
 
 	if try_install_xray_asset "$asset"; then
-		ok "Xray-core v${PINNED_XRAY_VERSION} установлен отдельной копией: $NETCRAZE_XRAY_BIN (не трогает никакой другой Xray на устройстве, если он есть)"
+		ok "Xray-core v${PINNED_XRAY_VERSION} установлен отдельной копией: $NDMS_XRAY_BIN (не трогает никакой другой Xray на устройстве, если он есть)"
 		return 0
 	fi
 
@@ -514,7 +514,7 @@ ensure_xray_available() {
 	if [ -n "$alt_asset" ]; then
 		log "${asset} не запустился на этом устройстве вообще (не проблема версии/soft-float) — похоже, uname врёт про эндианность. Пробую little-endian вариант: ${alt_asset}..."
 		if try_install_xray_asset "$alt_asset"; then
-			ok "Xray-core v${PINNED_XRAY_VERSION} (little-endian, ${alt_asset}) установлен отдельной копией: $NETCRAZE_XRAY_BIN"
+			ok "Xray-core v${PINNED_XRAY_VERSION} (little-endian, ${alt_asset}) установлен отдельной копией: $NDMS_XRAY_BIN"
 			return 0
 		fi
 	fi
@@ -524,7 +524,7 @@ ensure_xray_available() {
 
 xray_pids() {
 	local config cmdline cmd pid
-	config="$(conf_get XRAY_CONFIG /opt/etc/netcraze-remote/xray-client.json)"
+	config="$(conf_get XRAY_CONFIG /opt/etc/NDMS-remote/xray-client.json)"
 	[ -n "$config" ] || return 0
 	for cmdline in /proc/[0-9]*/cmdline; do
 		[ -r "$cmdline" ] || continue
@@ -554,12 +554,12 @@ render_client_config() {
 	stdout="0"
 	[ "${1:-}" = "--stdout" ] && stdout="1"
 
-	router_id="$(safe_id "$(conf_get ROUTER_ID netcraze)")"
+	router_id="$(safe_id "$(conf_get ROUTER_ID NDMS)")"
 	vps_host="$(conf_get VPS_HOST '')"
 	vps_port="$(safe_num "$(conf_get VPS_PORT 8444)" 8444)"
 	encryption="$(conf_get VLESS_ENCRYPTION none)"
 	flow="$(conf_get VLESS_FLOW '')"
-	xray_config="$(conf_get XRAY_CONFIG /opt/etc/netcraze-remote/xray-client.json)"
+	xray_config="$(conf_get XRAY_CONFIG /opt/etc/NDMS-remote/xray-client.json)"
 	tls_sni="$(conf_get TLS_SNI '')"
 
 	[ -n "$vps_host" ] || die "VPS_HOST пустой"
@@ -661,7 +661,7 @@ render_client_config() {
 	outbounds_json="${outbounds_json%,}"
 	rules_json="${rules_json%,}"
 
-	out="${TMPDIR:-/opt/tmp}/netcraze-remote-client.$$"
+	out="${TMPDIR:-/opt/tmp}/NDMS-remote-client.$$"
 	mkdir -p "$(dirname "$out")"
 	cat >"$out" <<EOF
 {
@@ -675,7 +675,7 @@ render_client_config() {
     "rules": [${rules_json}
     ]
   },
-  "remarks": "netcraze-remote client for $(json_escape "$router_id")"
+  "remarks": "NDMS-remote client for $(json_escape "$router_id")"
 }
 EOF
 
@@ -762,7 +762,7 @@ heartbeat_running() {
 heartbeat_json() {
 	local router_id router_name role public_url hub_url xray_state ssh_state enabled_state
 
-	router_id="$(safe_id "$(conf_get ROUTER_ID netcraze)")"
+	router_id="$(safe_id "$(conf_get ROUTER_ID NDMS)")"
 	router_name="$(conf_get ROUTER_NAME "$router_id")"
 	role="$(conf_get ROLE node)"
 	public_url="$(conf_get PUBLIC_URL '')"
@@ -821,7 +821,7 @@ send_heartbeat() {
 	[ -n "$hub_url" ] || die "HUB_URL пустой"
 	[ -n "$token" ] || die "HUB_TOKEN пустой"
 	endpoint="${hub_url%/}/api/heartbeat"
-	tmp="${TMPDIR:-/opt/tmp}/netcraze-remote-hb.$$"
+	tmp="${TMPDIR:-/opt/tmp}/NDMS-remote-hb.$$"
 	mkdir -p "$(dirname "$tmp")"
 	heartbeat_json > "$tmp"
 	post_json "$endpoint" "$token" "$tmp"
@@ -895,7 +895,7 @@ self_heal_check() {
 update_agent() {
 	local newfile grace tmp_bin
 	newfile="$1"
-	[ -n "$newfile" ] || die "использование: netcraze-remote update /path/to/new/netcraze-remote"
+	[ -n "$newfile" ] || die "использование: NDMS-remote update /path/to/new/NDMS-remote"
 	[ -r "$newfile" ] || die "файл не читается: $newfile"
 
 	sh -n "$newfile" || die "новый файл не прошёл проверку синтаксиса (sh -n) — не устанавливаю"
@@ -903,7 +903,7 @@ update_agent() {
 	cp "$AGENT_BIN" "$AGENT_BAK" || die "не смог сделать бэкап текущего бинарника, обновление остановлено"
 
 	# VodkinNET: та же ловушка self-overwrite, что и в rollback_agent() —
-	# этот процесс (netcraze-remote update ...) сам сейчас исполняется из
+	# этот процесс (NDMS-remote update ...) сам сейчас исполняется из
 	# $AGENT_BIN. Пишем в отдельный временный файл и подменяем одним mv.
 	tmp_bin="${AGENT_BIN}.new.$$"
 	if ! cp "$newfile" "$tmp_bin" || ! chmod +x "$tmp_bin"; then
@@ -972,8 +972,8 @@ pull_config() {
 	token="$(conf_get HUB_TOKEN '')"
 	[ -n "$hub_url" ] || die "HUB_URL пустой"
 	[ -n "$token" ] || die "HUB_TOKEN пустой"
-	endpoint="${hub_url%/}/router/$(conf_get ROUTER_ID netcraze)/config"
-	tmp="${TMPDIR:-/opt/tmp}/netcraze-remote-pull.$$"
+	endpoint="${hub_url%/}/router/$(conf_get ROUTER_ID NDMS)/config"
+	tmp="${TMPDIR:-/opt/tmp}/NDMS-remote-pull.$$"
 	mkdir -p "$(dirname "$tmp")"
 
 	if command -v curl >/dev/null 2>&1; then
@@ -985,7 +985,7 @@ pull_config() {
 
 	enabled="$(conf_get ENABLED 1)"
 	xray_bin="$(conf_get XRAY_BIN '')"
-	xray_config="$(conf_get XRAY_CONFIG /opt/etc/netcraze-remote/xray-client.json)"
+	xray_config="$(conf_get XRAY_CONFIG /opt/etc/NDMS-remote/xray-client.json)"
 	hb_interval="$(conf_get HEARTBEAT_INTERVAL 30)"
 
 	cp "$CONF" "${CONF}.bak.$(date +%s 2>/dev/null || echo old)" 2>/dev/null || true
@@ -998,7 +998,7 @@ pull_config() {
 	conf_set XRAY_CONFIG "$xray_config"
 	conf_set HEARTBEAT_INTERVAL "$hb_interval"
 
-	ok "конфиг обновлён из Hub (бэкап рядом с .bak.*), перезапусти: netcraze-remote restart"
+	ok "конфиг обновлён из Hub (бэкап рядом с .bak.*), перезапусти: NDMS-remote restart"
 }
 
 # --- status / doctor -------------------------------------------------------
@@ -1014,7 +1014,7 @@ status() {
 	printf 'admin: %s:%s\n' "$(conf_get ADMIN_HOST "$(lan_ip_default)")" "$(conf_get ADMIN_PORT 80)"
 	printf 'ssh: %s:%s\n' "$(conf_get SSH_HOST "$(lan_ip_default)")" "$(conf_get SSH_PORT 22)"
 	printf 'xray_bin: %s\n' "$(xray_bin_path 2>/dev/null || echo 'не найден')"
-	printf 'xray_config: %s\n' "$(conf_get XRAY_CONFIG /opt/etc/netcraze-remote/xray-client.json)"
+	printf 'xray_config: %s\n' "$(conf_get XRAY_CONFIG /opt/etc/NDMS-remote/xray-client.json)"
 	if xray_running; then printf 'xray_state: running (pid %s)\n' "$(xray_pids | tr '\n' ' ')"; else printf 'xray_state: stopped\n'; fi
 	if heartbeat_running; then printf 'heartbeat_state: running (pid %s)\n' "$(cat "$PID_HB")"; else printf 'heartbeat_state: stopped\n'; fi
 	entware_ok && printf 'entware: ok\n' || printf 'entware: НЕ РАБОТАЕТ (см. doctor)\n'
@@ -1023,7 +1023,7 @@ status() {
 doctor() {
 	local ok_all=1
 
-	printf 'Диагностика netcraze-remote\n'
+	printf 'Диагностика NDMS-remote\n'
 	printf -- '---------------------------\n'
 
 	if entware_ok; then
@@ -1041,7 +1041,7 @@ doctor() {
 	if xray_bin_path >/dev/null 2>&1; then
 		ok "xray бинарь: $(xray_bin_path)"
 	else
-		printf '%b[!!]%b xray-core не найден (запусти netcraze-remote start — скачает автоматически)\n' "$C_RED" "$C_NC"
+		printf '%b[!!]%b xray-core не найден (запусти NDMS-remote start — скачает автоматически)\n' "$C_RED" "$C_NC"
 		ok_all=0
 	fi
 
@@ -1053,11 +1053,11 @@ doctor() {
 		fi
 	done
 
-	if xray_running; then ok "xray процесс запущен ($(xray_pids | tr '\n' ' '))"; else warn "xray процесс не запущен (netcraze-remote start)"; fi
+	if xray_running; then ok "xray процесс запущен ($(xray_pids | tr '\n' ' '))"; else warn "xray процесс не запущен (NDMS-remote start)"; fi
 	if heartbeat_running; then ok "heartbeat запущен"; else warn "heartbeat не запущен"; fi
 
 	if [ -d /opt/etc/xray/configs ]; then
-		warn "обнаружен /opt/etc/xray/configs (похоже на XKeen) — netcraze-remote его НЕ трогает, использует отдельный XRAY_CONFIG=$(conf_get XRAY_CONFIG /opt/etc/netcraze-remote/xray-client.json)"
+		warn "обнаружен /opt/etc/xray/configs (похоже на XKeen) — NDMS-remote его НЕ трогает, использует отдельный XRAY_CONFIG=$(conf_get XRAY_CONFIG /opt/etc/NDMS-remote/xray-client.json)"
 	fi
 
 	# Живая проверка: реально ли запускается xray с текущим конфигом

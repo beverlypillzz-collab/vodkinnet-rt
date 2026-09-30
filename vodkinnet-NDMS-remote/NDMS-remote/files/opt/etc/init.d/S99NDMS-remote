@@ -3,10 +3,10 @@
 # rc.unslung/Entware сам вызывает все исполняемые /opt/etc/init.d/S* скрипты
 # с аргументом "start" при старте роутера, и "stop" при остановке Entware.
 
-ENABLE="/opt/etc/netcraze-remote/netcraze-remote.conf"
-AGENT="/opt/sbin/netcraze-remote"
+ENABLE="/opt/etc/NDMS-remote/NDMS-remote.conf"
+AGENT="/opt/sbin/NDMS-remote"
 
-[ -x "$AGENT" ] || { echo "netcraze-remote: агент не найден ($AGENT)"; exit 0; }
+[ -x "$AGENT" ] || { echo "NDMS-remote: агент не найден ($AGENT)"; exit 0; }
 
 case "${1:-start}" in
 	start)
@@ -20,7 +20,7 @@ case "${1:-start}" in
 		fi
 
 		if [ ! -f "$ENABLE" ]; then
-			echo "netcraze-remote: конфиг не найден ($ENABLE) — пропускаю автозапуск, см. .conf.example"
+			echo "NDMS-remote: конфиг не найден ($ENABLE) — пропускаю автозапуск, см. .conf.example"
 			exit 0
 		fi
 		"$AGENT" start

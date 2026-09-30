@@ -1,18 +1,18 @@
 #!/bin/sh
-# VodkinNET: netcraze-remote-watchdog — перенесено из owrt-remote-watchdog
+# VodkinNET: NDMS-remote-watchdog — перенесено из owrt-remote-watchdog
 # (см. changelog vodkinnet-owrt-remote за 2026-08-23: живой инцидент, где
 # rollback-логика ВНУТРИ обновляемого агента не смогла откатиться сама
 # из-за self-overwrite бага, и спас только полностью независимый watchdog).
 #
-# Этот файл ПОЛНОСТЬЮ ОТДЕЛЬНЫЙ от /opt/sbin/netcraze-remote. update_agent()
-# внутри netcraze-remote никогда его не трогает и не знает о нём. Не читает
+# Этот файл ПОЛНОСТЬЮ ОТДЕЛЬНЫЙ от /opt/sbin/NDMS-remote. update_agent()
+# внутри NDMS-remote никогда его не трогает и не знает о нём. Не читает
 # и не исполняет ничего из основного агента — только свои встроенные проверки
 # ниже. Если update поставил версию, которая не может даже подняться
 # (синтаксическая ошибка, heartbeat-loop падает при старте) — это никак не
 # влияет на watchdog.
 #
 # Запускается через cron (Entware), не как процесс, которым управляет сам
-# netcraze-remote — именно потому, что если сам агент (xray + heartbeat-loop)
+# NDMS-remote — именно потому, что если сам агент (xray + heartbeat-loop)
 # упадёт целиком, поднимать его больше некому: в отличие от owrt-remote
 # (procd с respawn) здесь НЕТ вообще никакого supervisor'а для процесса
 # heartbeat-loop самого по себе (только heartbeat-loop, пока жив, чинит
@@ -21,14 +21,14 @@
 #
 # Установка (один раз, делает install.sh):
 #   opkg install cron (если ещё не стоит)
-#   echo "* * * * * /opt/sbin/netcraze-remote-watchdog" >> /opt/etc/crontabs/root
+#   echo "* * * * * /opt/sbin/NDMS-remote-watchdog" >> /opt/etc/crontabs/root
 #   /opt/etc/init.d/S*cron* restart (или enable, смотря по пакету)
 
-CONF="/opt/etc/netcraze-remote/netcraze-remote.conf"
-BIN="/opt/sbin/netcraze-remote"
+CONF="/opt/etc/NDMS-remote/NDMS-remote.conf"
+BIN="/opt/sbin/NDMS-remote"
 BAK="${BIN}.bak"
-MARKER="/opt/etc/netcraze-remote/update-pending"
-LOG="/opt/var/log/netcraze-remote-rollback.log"
+MARKER="/opt/etc/NDMS-remote/update-pending"
+LOG="/opt/var/log/NDMS-remote-rollback.log"
 
 # Нет маркера обновления — обновления не было (или уже разобрались).
 [ -f "$MARKER" ] || exit 0
@@ -103,7 +103,7 @@ fi
 [ "$elapsed" -ge "$grace" ] || exit 0
 
 if [ ! -x "$BAK" ]; then
-	logger -t netcraze-remote-watchdog "rollback needed but $BAK missing or not executable" 2>/dev/null
+	logger -t NDMS-remote-watchdog "rollback needed but $BAK missing or not executable" 2>/dev/null
 	rm -f "$MARKER"
 	exit 1
 fi
@@ -113,7 +113,7 @@ if cp "$BAK" "$tmp" 2>/dev/null && chmod +x "$tmp" 2>/dev/null; then
 	mv "$tmp" "$BIN"
 else
 	rm -f "$tmp"
-	logger -t netcraze-remote-watchdog "rollback failed: could not prepare temp copy from $BAK" 2>/dev/null
+	logger -t NDMS-remote-watchdog "rollback failed: could not prepare temp copy from $BAK" 2>/dev/null
 	exit 1
 fi
 
@@ -121,6 +121,6 @@ rm -f "$MARKER"
 mkdir -p "$(dirname "$LOG")" 2>/dev/null
 printf '%s watchdog: откат выполнен (туннель не поднялся за %sс, прошло %sс)\n' \
 	"$(date '+%F %T' 2>/dev/null || echo '?')" "$grace" "$elapsed" >>"$LOG" 2>/dev/null
-logger -t netcraze-remote-watchdog "rollback executed: tunnel down after ${elapsed}s (grace ${grace}s), restored $BAK" 2>/dev/null
+logger -t NDMS-remote-watchdog "rollback executed: tunnel down after ${elapsed}s (grace ${grace}s), restored $BAK" 2>/dev/null
 
 ( "$BIN" restart >/dev/null 2>&1 & )
