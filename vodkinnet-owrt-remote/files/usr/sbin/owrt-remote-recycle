@@ -1,0 +1,80 @@
+#!/bin/sh
+# VodkinNET: owrt-remote-recycle — периодический профилактический рестарт
+# сервиса owrt-remote (xray + heartbeat-инстансы) на RAM-стеснённых
+# устройствах, где долгий аптайм реверс-тунеля постепенно съедает память
+# (Xray сам по себе, либо общий рост буферов/кэша при тесном лимите RAM).
+#
+# ПОЛНОСТЬЮ ОТДЕЛЬНЫЙ от owrt-remote/owrt-remote-watchdog файл, по тому же
+# принципу: не исполняет и не импортирует код основного агента, только свои
+# встроенные проверки ниже. Отключён по умолчанию (recycle_interval_hours=0
+# в uci) — не меняет поведение ни для одного роутера флота, пока явно не
+# включено на конкретном устройстве.
+#
+# Запускается через cron раз в час и сам решает, пора ли рестартовать,
+# сравнивая сохранённую метку времени последнего рестарта с текущим
+# временем — не жёсткое "каждый час", а настраиваемый интервал.
+#
+# Установка (один раз, не через update):
+#   echo "0 * * * * /usr/sbin/owrt-remote-recycle" >> /etc/crontabs/root
+#   /etc/init.d/cron restart
+#   uci set owrtremote.main.recycle_interval_hours='12'
+#   uci commit owrtremote
+
+CONFIG="owrtremote"
+SECTION="main"
+UPDATE_MARKER="/etc/owrt-remote-update-pending"
+CONFIG_MARKER="/etc/owrt-remote-config-pending"
+STATE="/etc/owrt-remote-recycle-last"
+LOG="/etc/owrt-remote-rollback.log"
+
+uci_get() {
+	local v
+	v="$(uci -q get "$CONFIG.$SECTION.$1" 2>/dev/null)"
+	if [ -n "$v" ]; then
+		printf '%s' "$v"
+	else
+		printf '%s' "$2"
+	fi
+}
+
+# Не мешаем активному self-heal/rollback после обновления агента или смены
+# admin_host/admin_port — если маркер взведён, heartbeat-loop сам либо
+# подтвердит новую версию/конфиг, либо откатит её в ближайшие секунды.
+# Рестарт сервиса прямо сейчас сбил бы эту проверку с толку.
+[ -f "$UPDATE_MARKER" ] && exit 0
+[ -f "$CONFIG_MARKER" ] && exit 0
+
+case "$(uci_get enabled 0)" in
+	1|yes|true|on|enabled) ;;
+	*) exit 0 ;;
+esac
+
+interval_hours="$(uci_get recycle_interval_hours 0)"
+case "$interval_hours" in
+	''|*[!0-9]*) interval_hours=0 ;;
+esac
+
+# 0 = выключено (по умолчанию) — ничего не делаем и не трогаем STATE-файл.
+[ "$interval_hours" -gt 0 ] || exit 0
+
+now="$(date +%s 2>/dev/null || echo 0)"
+last="0"
+if [ -f "$STATE" ]; then
+	last="$(cat "$STATE" 2>/dev/null)"
+fi
+case "$last" in
+	''|*[!0-9]*) last=0 ;;
+esac
+
+interval_seconds=$((interval_hours * 3600))
+elapsed=$((now - last))
+
+[ "$elapsed" -ge "$interval_seconds" ] || exit 0
+
+echo "$now" >"$STATE" 2>/dev/null
+
+printf '%s recycle: профилактический рестарт (интервал %sч, прошло %sс)\n' \
+	"$(date '+%F %T' 2>/dev/null || echo '?')" "$interval_hours" "$elapsed" >>"$LOG" 2>/dev/null
+logger -t owrt-remote-recycle "профилактический рестарт (интервал ${interval_hours}ч) — защита от постепенного роста потребления памяти"
+
+/etc/init.d/owrt-remote restart >/dev/null 2>&1

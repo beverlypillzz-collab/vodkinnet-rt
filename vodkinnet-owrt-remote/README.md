@@ -44,6 +44,11 @@ curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/
 Один и тот же скрипт ставит агент с нуля и обновляет уже развёрнутый —
 сам определяет, что перед ним, по наличию текущего `owrt-remote`.
 
+Выбор — какой из двух скриптов запускать — зависит от того, чего именно
+не хватает на конкретном устройстве: flash или RAM.
+
+**Обычные устройства (мало flash, это основной случай):**
+
 ```sh
 wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/install.sh?v=$(date +%s)" | sh
 ```
@@ -51,6 +56,30 @@ wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/m
 При обновлении: проверяет синтаксис (`sh -n`) до установки, бэкапит
 агент и `init.d` (`.bak`), ставит атомарно (`mv`), настраивает
 `owrt-remote-watchdog` на cron. `/etc/config/owrtremote` не трогается.
+
+**RAM-стеснённые устройства (flash в достатке, мало RAM):** если
+`free`/карточка в панели показывает мало доступной памяти при обилии
+свободной flash — используйте `install-lowmem.sh` вместо обычного
+`install.sh`:
+
+```sh
+wget -O - "https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote/install-lowmem.sh?v=$(date +%s)" | sh
+```
+
+Это отдельная, самостоятельная надстройка — она вызывает обычный
+`install.sh` без единого изменения в нём, а затем двумя дополнительными
+шагами переносит Xray-бинарник с RAM (`/tmp`) на flash
+(`/usr/lib/owrt-remote-xray`, освобождает ~20 МБ RAM и переживает
+перезагрузку) и ставит `owrt-remote-recycle` — опциональный
+периодический рестарт сервиса, по умолчанию выключен:
+
+```sh
+uci set owrtremote.main.recycle_interval_hours='12'
+uci commit owrtremote
+```
+
+Ни сам `owrt-remote`, ни `install.sh` эта надстройка не меняет — на
+остальном флоте (обычный `install.sh`) её вообще нет на диске.
 
 Точечное обновление одного файла и ручной rollback:
 
