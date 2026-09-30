@@ -9,7 +9,7 @@ __pycache__/
 secrets/
 *.db
 hub.db
-*netcraze-remote-client.json
+*NDMS-remote-client.json
 xray-client.json
 /etc/
 *.pem

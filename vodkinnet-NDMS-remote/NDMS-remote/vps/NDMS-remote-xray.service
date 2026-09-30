@@ -1,16 +1,16 @@
 [Unit]
-Description=netcraze-remote Xray (reverse tunnel portal for Keenetic fleet)
+Description=NDMS-remote Xray (reverse tunnel portal for Keenetic fleet)
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/netcraze-remote-xray run -config /etc/netcraze-remote/xray.json
+ExecStart=/usr/local/bin/NDMS-remote-xray run -config /etc/NDMS-remote/xray.json
 Restart=on-failure
 RestartSec=3
 # VodkinNET: не root — читает сертификат через членство в группе ssl-cert
 # (стандартный для этого сервера паттерн, как и у соседних панелей).
-User=netcraze-remote
-Group=netcraze-remote
+User=NDMS-remote
+Group=NDMS-remote
 NoNewPrivileges=true
 
 [Install]

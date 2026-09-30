@@ -1,24 +1,24 @@
 #!/bin/sh
-# netcraze-remote — установка Hub-панели на VPS.
+# NDMS-remote — установка Hub-панели на VPS.
 #
 # v2: Hub и Xray-процесс работают от отдельного системного пользователя
-# netcraze-remote (НЕ root) — единственное root-действие (рестарт
-# netcraze-remote-xray после изменения списка роутеров) идёт через узкое
+# NDMS-remote (НЕ root) — единственное root-действие (рестарт
+# NDMS-remote-xray после изменения списка роутеров) идёт через узкое
 # sudoers-правило на один конкретный systemctl-вызов. Xray-бинарь
 # проверяется по SHA256SUMS релиза перед установкой.
 #
-#   curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote/vps/install-vps.sh?v=$(date +%s)" | sudo sh
+#   curl -fsSL "https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-NDMS-remote/NDMS-remote/vps/install-vps.sh?v=$(date +%s)" | sudo sh
 
 set -eu
 
-REPO_RAW="https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-keenetic/netcraze-remote"
-INSTALL_DIR="/opt/netcraze-remote"
-XRAY_BIN="/usr/local/bin/netcraze-remote-xray"
-XRAY_CONFIG_DIR="/etc/netcraze-remote"
-XRAY_CONFIG="/etc/netcraze-remote/xray.json"
-STATE_DIR="/var/lib/netcraze-remote"
-ENV_FILE="/etc/netcraze-remote/hub.env"
-SVC_USER="netcraze-remote"
+REPO_RAW="https://raw.githubusercontent.com/beverlypillzz-collab/vodkinnet-rt/main/vodkinnet-NDMS-remote/NDMS-remote"
+INSTALL_DIR="/opt/NDMS-remote"
+XRAY_BIN="/usr/local/bin/NDMS-remote-xray"
+XRAY_CONFIG_DIR="/etc/NDMS-remote"
+XRAY_CONFIG="/etc/NDMS-remote/xray.json"
+STATE_DIR="/var/lib/NDMS-remote"
+ENV_FILE="/etc/NDMS-remote/hub.env"
+SVC_USER="NDMS-remote"
 
 C_GREEN='\033[0;32m'; C_YELLOW='\033[1;33m'; C_RED='\033[0;31m'; C_CYAN='\033[0;36m'; C_NC='\033[0m'
 ok()   { printf '%b[+]%b %s\n' "$C_GREEN" "$C_NC" "$*"; }
@@ -26,7 +26,7 @@ info() { printf '%b[i]%b %s\n' "$C_YELLOW" "$C_NC" "$*"; }
 err()  { printf '%b[!!]%b %s\n' "$C_RED" "$C_NC" "$*" >&2; }
 
 # VodkinNET: тот же баннер, что и у vodkinnet-owrt-remote и у самого агента
-# netcraze-remote — единый вид установки для всего флота, независимо от того,
+# NDMS-remote — единый вид установки для всего флота, независимо от того,
 # что именно ставится (агент на роутере или панель на VPS).
 vodkin_banner() {
 	printf '\n'
@@ -39,7 +39,7 @@ vodkin_banner() {
 	printf '  %s\n' "${1:-Keenetic/Entware Hub installer}"
 	printf '  beverlypillzz-collab/vodkinnet-rt\n\n'
 }
-vodkin_banner "netcraze-remote Hub installer (VPS)"
+vodkin_banner "NDMS-remote Hub installer (VPS)"
 
 # VodkinNET: raw.githubusercontent.com (Fastly) кэширует по эджам, привязанным
 # к сети запроса — при curl|sh с VPS можно словить другой, более старый эдж,
@@ -131,8 +131,8 @@ read -r EXTERNAL_HTTPS_PORT < /dev/tty
 # install-vps.sh — это не конфликт с чужим сервисом, а повторный прогон
 # по своим же следам. nginx спокойно перечитает тот же конфиг заново.
 PORT_ALREADY_OURS=0
-if [ -f "/etc/nginx/sites-available/netcraze-remote" ] && \
-   grep -q "listen ${EXTERNAL_HTTPS_PORT} ssl;" "/etc/nginx/sites-available/netcraze-remote" 2>/dev/null; then
+if [ -f "/etc/nginx/sites-available/NDMS-remote" ] && \
+   grep -q "listen ${EXTERNAL_HTTPS_PORT} ssl;" "/etc/nginx/sites-available/NDMS-remote" 2>/dev/null; then
 	PORT_ALREADY_OURS=1
 fi
 
@@ -140,10 +140,10 @@ if [ "$PORT_ALREADY_OURS" = "0" ] && command -v ss >/dev/null 2>&1 && ss -ltn 2>
 	err "порт ${EXTERNAL_HTTPS_PORT} уже занят каким-то процессом на этом сервере (проверь: ss -tlnp | grep :${EXTERNAL_HTTPS_PORT}). Выбери другой порт и запусти установку заново."
 	exit 1
 fi
-[ "$PORT_ALREADY_OURS" = "1" ] && info "порт ${EXTERNAL_HTTPS_PORT} уже используется собственным nginx-vhost netcraze-remote с прошлого запуска — переиспользую, это ожидаемо."
+[ "$PORT_ALREADY_OURS" = "1" ] && info "порт ${EXTERNAL_HTTPS_PORT} уже используется собственным nginx-vhost NDMS-remote с прошлого запуска — переиспользую, это ожидаемо."
 
-VLESS_PORT="${NETCRAZE_REMOTE_VLESS_PORT:-8444}"
-HUB_PORT="${NETCRAZE_REMOTE_HUB_PORT:-8099}"
+VLESS_PORT="${NDMS_REMOTE_VLESS_PORT:-8444}"
+HUB_PORT="${NDMS_REMOTE_HUB_PORT:-8099}"
 
 # --- пакеты ---
 if command -v apt-get >/dev/null 2>&1; then
@@ -169,7 +169,7 @@ chmod 750 "$STATE_DIR" "$XRAY_CONFIG_DIR"
 
 # --- Xray binary (отдельная копия, отдельное имя бинаря, с проверкой checksum) ---
 if [ ! -x "$XRAY_BIN" ]; then
-	info "ставлю отдельный бинарь Xray для netcraze-remote (с проверкой .dgst релиза)..."
+	info "ставлю отдельный бинарь Xray для NDMS-remote (с проверкой .dgst релиза)..."
 	TMP_DIR="$(mktemp -d)"
 	ARCH="$(uname -m)"
 	case "$ARCH" in
@@ -218,11 +218,11 @@ if [ ! -x "$XRAY_BIN" ]; then
 	rm -rf "$TMP_DIR"
 	ok "Xray поставлен и проверен: $XRAY_BIN"
 else
-	ok "Xray для netcraze-remote уже стоит: $XRAY_BIN"
+	ok "Xray для NDMS-remote уже стоит: $XRAY_BIN"
 fi
 
 # --- Hub script ---
-fetch_file "vps/netcraze-remote-hub.py" "${INSTALL_DIR}/netcraze-remote-hub.py"
+fetch_file "vps/NDMS-remote-hub.py" "${INSTALL_DIR}/NDMS-remote-hub.py"
 
 # VodkinNET: xterm.js/css/addon-fit — раньше грузились с cdn.jsdelivr.net,
 # но на практике встроенная защита браузера от трекеров (Tracking
@@ -233,8 +233,8 @@ mkdir -p "${INSTALL_DIR}/static"
 fetch_file "vps/static/xterm.min.js" "${INSTALL_DIR}/static/xterm.min.js"
 fetch_file "vps/static/xterm.min.css" "${INSTALL_DIR}/static/xterm.min.css"
 fetch_file "vps/static/addon-fit.min.js" "${INSTALL_DIR}/static/addon-fit.min.js"
-chmod +x "${INSTALL_DIR}/netcraze-remote-hub.py"
-chown "$SVC_USER:$SVC_USER" "${INSTALL_DIR}/netcraze-remote-hub.py"
+chmod +x "${INSTALL_DIR}/NDMS-remote-hub.py"
+chown "$SVC_USER:$SVC_USER" "${INSTALL_DIR}/NDMS-remote-hub.py"
 chown -R "$SVC_USER:$SVC_USER" "${INSTALL_DIR}/static"
 
 # --- сертификат ---
@@ -259,16 +259,16 @@ echo "$HUB_DOMAIN" > "${XRAY_CONFIG_DIR}/cert-domain"
 
 # --- certbot deploy-hook: чинит права ключа + рестартит ТОЛЬКО наш xray ---
 mkdir -p /etc/letsencrypt/renewal-hooks/deploy
-fetch_file "vps/certbot-deploy-hook.sh" /etc/letsencrypt/renewal-hooks/deploy/netcraze-remote.sh
-chmod +x /etc/letsencrypt/renewal-hooks/deploy/netcraze-remote.sh
+fetch_file "vps/certbot-deploy-hook.sh" /etc/letsencrypt/renewal-hooks/deploy/NDMS-remote.sh
+chmod +x /etc/letsencrypt/renewal-hooks/deploy/NDMS-remote.sh
 
 # --- пароль администратора: НЕ передаём как argv (виден в ps/history) ---
-if [ -z "${NETCRAZE_REMOTE_ADMIN_PASSWORD:-}" ]; then
+if [ -z "${NDMS_REMOTE_ADMIN_PASSWORD:-}" ]; then
 	ADMIN_PASSWORD="$(head -c 18 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 24)"
 else
-	ADMIN_PASSWORD="$NETCRAZE_REMOTE_ADMIN_PASSWORD"
+	ADMIN_PASSWORD="$NDMS_REMOTE_ADMIN_PASSWORD"
 fi
-ADMIN_USER="${NETCRAZE_REMOTE_ADMIN_USER:-admin}"
+ADMIN_USER="${NDMS_REMOTE_ADMIN_USER:-admin}"
 
 # VodkinNET: полный публичный URL панели — считаем ОДИН раз здесь и
 # переиспользуем и для hub.env (PUBLIC_URL, чтобы агенты роутеров
@@ -287,20 +287,20 @@ fi
 
 # --- env для systemd ---
 cat > "$ENV_FILE" <<EOF
-NETCRAZE_REMOTE_STATE_DIR=${STATE_DIR}
-NETCRAZE_REMOTE_XRAY_CONFIG=${XRAY_CONFIG}
-NETCRAZE_REMOTE_XRAY_SERVICE=netcraze-remote-xray
-NETCRAZE_REMOTE_BIND=127.0.0.1
-NETCRAZE_REMOTE_PORT=${HUB_PORT}
-NETCRAZE_REMOTE_VLESS_PORT=${VLESS_PORT}
-NETCRAZE_REMOTE_TLS_CERT=${CERT_PATH}
-NETCRAZE_REMOTE_TLS_KEY=${KEY_PATH}
-NETCRAZE_REMOTE_TLS_SNI=${HUB_DOMAIN}
-NETCRAZE_REMOTE_PUBLIC_HOST=${HUB_DOMAIN}
-NETCRAZE_REMOTE_PUBLIC_URL=${PUBLIC_URL}
-NETCRAZE_REMOTE_VPS_SSH_USER=root
-NETCRAZE_REMOTE_VPS_SSH_PORT=22
-NETCRAZE_REMOTE_SUDO_RESTART=1
+NDMS_REMOTE_STATE_DIR=${STATE_DIR}
+NDMS_REMOTE_XRAY_CONFIG=${XRAY_CONFIG}
+NDMS_REMOTE_XRAY_SERVICE=NDMS-remote-xray
+NDMS_REMOTE_BIND=127.0.0.1
+NDMS_REMOTE_PORT=${HUB_PORT}
+NDMS_REMOTE_VLESS_PORT=${VLESS_PORT}
+NDMS_REMOTE_TLS_CERT=${CERT_PATH}
+NDMS_REMOTE_TLS_KEY=${KEY_PATH}
+NDMS_REMOTE_TLS_SNI=${HUB_DOMAIN}
+NDMS_REMOTE_PUBLIC_HOST=${HUB_DOMAIN}
+NDMS_REMOTE_PUBLIC_URL=${PUBLIC_URL}
+NDMS_REMOTE_VPS_SSH_USER=root
+NDMS_REMOTE_VPS_SSH_PORT=22
+NDMS_REMOTE_SUDO_RESTART=1
 EOF
 chmod 640 "$ENV_FILE"
 chown root:"$SVC_USER" "$ENV_FILE"
@@ -309,50 +309,50 @@ chown root:"$SVC_USER" "$ENV_FILE"
 # set-admin-password с опциональным паролем — есть set-login, но там оба
 # флага (--username/--password) ОБЯЗАТЕЛЬНЫ, а значит пароль обязательно
 # светился бы в `ps aux`/истории. Вместо этого пользуемся тем, что
-# load_auth() сама лениво создаёт логин из NETCRAZE_REMOTE_ADMIN_USER/
-# NETCRAZE_REMOTE_ADMIN_PASSWORD (уже в hub.env) при первом обращении —
+# load_auth() сама лениво создаёт логин из NDMS_REMOTE_ADMIN_USER/
+# NDMS_REMOTE_ADMIN_PASSWORD (уже в hub.env) при первом обращении —
 # просто дёргаем "init", который её вызывает, без пароля в argv вообще.
 sudo -u "$SVC_USER" env \
-	NETCRAZE_REMOTE_STATE_DIR="$STATE_DIR" \
-	NETCRAZE_REMOTE_ADMIN_USER="$ADMIN_USER" \
-	NETCRAZE_REMOTE_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
-	python3 "${INSTALL_DIR}/netcraze-remote-hub.py" --db "${STATE_DIR}/hub.db" init
+	NDMS_REMOTE_STATE_DIR="$STATE_DIR" \
+	NDMS_REMOTE_ADMIN_USER="$ADMIN_USER" \
+	NDMS_REMOTE_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+	python3 "${INSTALL_DIR}/NDMS-remote-hub.py" --db "${STATE_DIR}/hub.db" init
 
 # render-xray просто пишет файл конфига, ничего не рестартует — на этом
 # бутстрап-этапе (до sudoers/systemd-юнита) рестарт и не нужен вообще.
 sudo -u "$SVC_USER" \
-	python3 "${INSTALL_DIR}/netcraze-remote-hub.py" --db "${STATE_DIR}/hub.db" \
+	python3 "${INSTALL_DIR}/NDMS-remote-hub.py" --db "${STATE_DIR}/hub.db" \
 	render-xray --listen-port "$VLESS_PORT" --out "$XRAY_CONFIG"
 
-# --- sudoers: узкое правило, только рестарт netcraze-remote-xray ---
+# --- sudoers: узкое правило, только рестарт NDMS-remote-xray ---
 SYSTEMCTL_PATH="$(command -v systemctl || echo /usr/bin/systemctl)"
-fetch_file "vps/netcraze-remote.sudoers" /tmp/netcraze-remote.sudoers.tmp
-sed "s#%SYSTEMCTL_PATH%#${SYSTEMCTL_PATH}#" /tmp/netcraze-remote.sudoers.tmp > /tmp/netcraze-remote.sudoers.final
-if visudo -c -f /tmp/netcraze-remote.sudoers.final >/dev/null 2>&1; then
-	install -m 0440 /tmp/netcraze-remote.sudoers.final /etc/sudoers.d/netcraze-remote
-	ok "sudoers-правило установлено (только systemctl restart netcraze-remote-xray)"
+fetch_file "vps/NDMS-remote.sudoers" /tmp/NDMS-remote.sudoers.tmp
+sed "s#%SYSTEMCTL_PATH%#${SYSTEMCTL_PATH}#" /tmp/NDMS-remote.sudoers.tmp > /tmp/NDMS-remote.sudoers.final
+if visudo -c -f /tmp/NDMS-remote.sudoers.final >/dev/null 2>&1; then
+	install -m 0440 /tmp/NDMS-remote.sudoers.final /etc/sudoers.d/NDMS-remote
+	ok "sudoers-правило установлено (только systemctl restart NDMS-remote-xray)"
 else
-	err "sudoers-файл не прошёл проверку visudo -c — НЕ установлен. Хаб не сможет рестартовать Xray сам, чини /etc/sudoers.d/netcraze-remote вручную."
+	err "sudoers-файл не прошёл проверку visudo -c — НЕ установлен. Хаб не сможет рестартовать Xray сам, чини /etc/sudoers.d/NDMS-remote вручную."
 fi
-rm -f /tmp/netcraze-remote.sudoers.tmp /tmp/netcraze-remote.sudoers.final
+rm -f /tmp/NDMS-remote.sudoers.tmp /tmp/NDMS-remote.sudoers.final
 
 # --- systemd units ---
-fetch_file "vps/netcraze-remote-hub.service" /etc/systemd/system/netcraze-remote-hub.service
-fetch_file "vps/netcraze-remote-xray.service" /etc/systemd/system/netcraze-remote-xray.service
-sed -i "s#/usr/local/bin/netcraze-remote-xray#${XRAY_BIN}#" /etc/systemd/system/netcraze-remote-xray.service
-sed -i "s#/etc/netcraze-remote/xray.json#${XRAY_CONFIG}#" /etc/systemd/system/netcraze-remote-xray.service
+fetch_file "vps/NDMS-remote-hub.service" /etc/systemd/system/NDMS-remote-hub.service
+fetch_file "vps/NDMS-remote-xray.service" /etc/systemd/system/NDMS-remote-xray.service
+sed -i "s#/usr/local/bin/NDMS-remote-xray#${XRAY_BIN}#" /etc/systemd/system/NDMS-remote-xray.service
+sed -i "s#/etc/NDMS-remote/xray.json#${XRAY_CONFIG}#" /etc/systemd/system/NDMS-remote-xray.service
 
 systemctl daemon-reload
-systemctl enable --now netcraze-remote-xray
-systemctl enable --now netcraze-remote-hub
+systemctl enable --now NDMS-remote-xray
+systemctl enable --now NDMS-remote-hub
 
 # --- секретный путь в URL (защита от automated-сканеров: голый "/" отдаёт
 # 404, панель не найти не зная этого сегмента; всё остальное после входа
 # продолжает работать как обычно — оно и так защищено сессией/логином) ---
 SECRET_PATH="$(head -c 18 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 16)"
-echo "$SECRET_PATH" > /etc/netcraze-remote/secret-path.txt
-chmod 0600 /etc/netcraze-remote/secret-path.txt
-chown "$SVC_USER":"$SVC_USER" /etc/netcraze-remote/secret-path.txt 2>/dev/null || true
+echo "$SECRET_PATH" > /etc/NDMS-remote/secret-path.txt
+chmod 0600 /etc/NDMS-remote/secret-path.txt
+chown "$SVC_USER":"$SVC_USER" /etc/NDMS-remote/secret-path.txt 2>/dev/null || true
 
 # --- nginx vhost (отдельный файл; порт 80-редирект добавляем только если
 # внешний порт для этой панели - 443, иначе на этом домене уже наверняка
@@ -371,7 +371,7 @@ else
 # 80->443 для того же server_name создал бы конфликт в nginx."
 fi
 
-cat > "/etc/nginx/sites-available/netcraze-remote" <<EOF
+cat > "/etc/nginx/sites-available/NDMS-remote" <<EOF
 ${PORT80_BLOCK}
 server {
     listen ${EXTERNAL_HTTPS_PORT} ssl;
@@ -416,7 +416,7 @@ server {
     }
 }
 EOF
-ln -sf /etc/nginx/sites-available/netcraze-remote /etc/nginx/sites-enabled/netcraze-remote
+ln -sf /etc/nginx/sites-available/NDMS-remote /etc/nginx/sites-enabled/NDMS-remote
 nginx -t
 # VodkinNET: "reload" не работает, если nginx сейчас не активен (может
 # оказаться так на боевом сервере по не связанным с этим скриптом
@@ -452,6 +452,6 @@ cat <<EOF
      происходит автоматически при добавлении роутера - нужно руками
      после каждого изменения списка роутеров).
   3. Открой "Конфиг" в карточке роутера -> вставь текст целиком в
-     /opt/etc/netcraze-remote/netcraze-remote.conf на Keenetic и запусти
-     агент (/opt/etc/init.d/S99netcraze-remote start).
+     /opt/etc/NDMS-remote/NDMS-remote.conf на Keenetic и запусти
+     агент (/opt/etc/init.d/S99NDMS-remote start).
 EOF
