@@ -1133,7 +1133,18 @@ ensure_fetch_tool() {
 
 install_xray_tmp() {
 	local dir zip dgst asset url dgst_url version entry candidates expected actual
-	dir="/tmp/owrt-xray"
+	# VodkinNET: живой инцидент 2026-10-01 — на RAM-стеснённом роутере (канарейка
+	# клиента, Xiaomi Redmi AC2100) скачивание 27MB zip + распаковка ~30MB
+	# бинарника в /tmp (это tmpfs, то есть RAM, а не диск) словили OOM killer
+	# прямо посреди установки: "Killed" + обрыв SSH-сессии. install-lowmem.sh
+	# экономит RAM только ПОСЛЕ установки (переносом готового бинарника на
+	# flash) — а сам пиковый расход RAM на скачивание+распаковку происходит
+	# раньше, на этом самом шаге, и его в принципе было нечем объехать. Фикс:
+	# разрешаем переопределить рабочую директорию через OWRT_REMOTE_XRAY_DIR —
+	# install-lowmem.sh теперь указывает её сразу на flash, так что zip и
+	# распакованный бинарник вообще не касаются tmpfs. Для обычного install.sh
+	# поведение не меняется (дефолт остаётся /tmp/owrt-xray).
+	dir="${OWRT_REMOTE_XRAY_DIR:-/tmp/owrt-xray}"
 	zip="$dir/xray.zip"
 	dgst="$dir/xray.zip.dgst"
 	asset="$(xray_release_asset)" || {

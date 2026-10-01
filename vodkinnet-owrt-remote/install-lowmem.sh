@@ -4,13 +4,28 @@
 # install.sh рассчитан на противоположный, куда более частый случай —
 # экономит flash, держа Xray-бинарник в /tmp/tmpfs, то есть в RAM).
 #
-# ПОЛНОСТЬЮ ОТДЕЛЬНЫЙ файл. НЕ меняет ни files/usr/sbin/owrt-remote, ни
-# install.sh, ни что-либо ещё в основном агенте — просто вызывает обычный
-# install.sh как есть, а затем двумя дополнительными шагами (поверх уже
-# установленного агента, через штатный uci) переносит Xray-бинарник на
-# flash и ставит опциональный периодический рестарт сервиса. Если что-то
-# в этих двух шагах пойдёт не так — базовый агент от install.sh уже
-# установлен и работает, это не совмещённый атомарный процесс.
+# ПОЧТИ ПОЛНОСТЬЮ ОТДЕЛЬНЫЙ файл — вызывает обычный install.sh как есть,
+# меняя единственное: куда install.sh (через owrt-remote install-xray-tmp)
+# скачивает и распаковывает Xray. Это единственный зацеп с основным
+# агентом — переменная окружения OWRT_REMOTE_XRAY_DIR, которую понимает
+# install_xray_tmp() в files/usr/sbin/owrt-remote (по умолчанию для
+# обычного install.sh она не задана и поведение не меняется).
+#
+# Живой инцидент 2026-10-01 (канарейка клиента, Xiaomi Redmi AC2100):
+# прежняя версия этого файла качала и распаковывала Xray в /tmp (tmpfs,
+# то есть RAM) НА ШАГЕ 1 через обычный install.sh, и только ПОТОМ, шагом 2,
+# переносила готовый бинарник на flash — то есть "экономия RAM" наступала
+# уже ПОСЛЕ того, как самый прожорливый момент (скачка 27MB zip + распаковка
+# ~30MB бинарника, пиково ~60-70MB) уже случился в RAM. На этом роутере
+# ровно в этот момент сработал OOM killer: процесс "Killed", SSH оборвался.
+# Экономить RAM "постфактум" бессмысленно для роутера, у которого этого
+# RAM не хватает уже на само скачивание.
+#
+# Фикс: больше не переносим бинарник после установки — сразу просим agent
+# качать и распаковывать Xray прямо на flash (XRAY_FLASH_DIR ниже), минуя
+# tmpfs целиком. Шаг "перенос" остался только как подстраховка на случай,
+# если xray_bin почему-то всё равно указывает на /tmp (например, старая
+# версия owrt-remote без поддержки OWRT_REMOTE_XRAY_DIR ещё не обновилась).
 #
 # Используется ВМЕСТО install.sh (не вместе с ним) на роутерах, где
 # `free`/карточка в панели показывает мало доступной RAM при достаточном
@@ -26,6 +41,7 @@ export PATH="/bin:/sbin:/usr/bin:/usr/sbin:${PATH:-}"
 
 RAW_URL="${RAW_URL:-https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote}"
 SCRIPT_DIR="$(CDPATH= cd "$(dirname "$0")" 2>/dev/null && pwd)" || SCRIPT_DIR=""
+XRAY_FLASH_DIR="/usr/lib/owrt-remote-xray"
 
 info() { printf '[*] %s\n' "$*"; }
 ok() { printf '[+] %s\n' "$*"; }
@@ -49,8 +65,10 @@ fetch_to() {
 	fi
 }
 
-# --- Шаг 1: обычная, ничем не отличающаяся установка основного агента ---
-info "Шаг 1/3: обычная установка агента (install.sh, без изменений)."
+# --- Шаг 1: установка основного агента, Xray качается СРАЗУ на flash ---
+info "Шаг 1/2: установка агента (install.sh), Xray качается сразу на flash, минуя RAM."
+mkdir -p "$XRAY_FLASH_DIR"
+export OWRT_REMOTE_XRAY_DIR="$XRAY_FLASH_DIR"
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/install.sh" ]; then
 	sh "$SCRIPT_DIR/install.sh"
 else
@@ -62,10 +80,8 @@ fi
 
 command -v uci >/dev/null 2>&1 || die "uci не найден — это точно OpenWrt?"
 
-# --- Шаг 2: перенос Xray-бинарника из /tmp (RAM) на flash ---
-info "Шаг 2/3: переношу Xray-бинарник с RAM (/tmp) на flash."
-
-XRAY_FLASH_DIR="/usr/lib/owrt-remote-xray"
+# --- Подстраховка: если xray_bin всё равно указывает на /tmp (старый ---
+# --- owrt-remote без поддержки OWRT_REMOTE_XRAY_DIR) - перенести вручную ---
 current_bin="$(uci -q get owrtremote.main.xray_bin 2>/dev/null || true)"
 
 if [ -z "$current_bin" ] || [ ! -x "$current_bin" ]; then
@@ -73,31 +89,25 @@ if [ -z "$current_bin" ] || [ ! -x "$current_bin" ]; then
 fi
 
 case "$current_bin" in
+	"$XRAY_FLASH_DIR"/*)
+		ok "Xray уже на flash: $current_bin (качался сразу туда, RAM на распаковку не тратилась)."
+		;;
 	/tmp/*)
+		warn "xray_bin всё ещё указывает на /tmp ($current_bin) — похоже, на роутере старая версия owrt-remote без поддержки OWRT_REMOTE_XRAY_DIR. Переношу постфактум (это тот самый RAM-тяжёлый путь, который и чинит этот скрипт — обнови агент, если видишь это предупреждение)."
 		entry="${current_bin##*/}"
-		mkdir -p "$XRAY_FLASH_DIR"
 		cp "$current_bin" "$XRAY_FLASH_DIR/$entry"
 		chmod +x "$XRAY_FLASH_DIR/$entry"
-		# VodkinNET: owrt-remote сам по себе уже поддерживает произвольный
-		# xray_bin — xray_bin_path()/ensure_xray_available() в
-		# files/usr/sbin/owrt-remote проверяют совпадение версии по
-		# зафиксированному OWRT_REMOTE_PINNED_XRAY_VERSION, а не то, что
-		# путь именно /tmp/owrt-xray/xray. Так что просто меняем uci —
-		# никакой код агента трогать не нужно.
 		uci set owrtremote.main.xray_bin="$XRAY_FLASH_DIR/$entry"
 		uci commit owrtremote
-		ok "Xray перенесён: $current_bin (RAM) -> $XRAY_FLASH_DIR/$entry (flash). Освобождено ~$(du -h "$XRAY_FLASH_DIR/$entry" 2>/dev/null | cut -f1) RAM, бинарник переживёт перезагрузку (не будет качаться заново с GitHub при каждом старте)."
-		;;
-	"$XRAY_FLASH_DIR"/*)
-		info "Xray уже на flash ($current_bin) — этот скрипт уже запускали, шаг 2 пропущен."
+		ok "Xray перенесён: $current_bin (RAM) -> $XRAY_FLASH_DIR/$entry (flash)."
 		;;
 	*)
-		warn "xray_bin указывает на нестандартный путь ($current_bin) — переносить не стал, разбирайтесь руками."
+		warn "xray_bin указывает на нестандартный путь ($current_bin) — не трогаю, разбирайтесь руками."
 		;;
 esac
 
-# --- Шаг 3: owrt-remote-recycle — периодический профилактический рестарт ---
-info "Шаг 3/3: ставлю owrt-remote-recycle (периодический рестарт, по умолчанию ВЫКЛЮЧЕН)."
+# --- Шаг 2/2: owrt-remote-recycle — периодический профилактический рестарт ---
+info "Шаг 2/2: ставлю owrt-remote-recycle (периодический рестарт, по умолчанию ВЫКЛЮЧЕН)."
 
 recycle_dst="/usr/sbin/owrt-remote-recycle"
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/files/usr/sbin/owrt-remote-recycle" ]; then
