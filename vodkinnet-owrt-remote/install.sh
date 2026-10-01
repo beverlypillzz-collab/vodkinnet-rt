@@ -5,7 +5,17 @@ set -eu
 export PATH="/bin:/sbin:/usr/bin:/usr/sbin:${PATH:-}"
 
 RAW_URL="${RAW_URL:-https://raw.githubusercontent.com/beverlypillzz-collab/Vodkinnet-RT/main/vodkinnet-owrt-remote}"
-ROOT="${ROOT:-/}"
+# VodkinNET: намеренно НЕ "ROOT" — живой баг на флоте (2026-09-30/10-01):
+# на одном из роутеров в окружении уже была выставлена переменная ROOT
+# (откуда именно - не выяснено, подозрение на кастомную прошивку продавца
+# с podkop), install.sh подхватил её через ROOT="${ROOT:-/}" как чужую, и
+# install_xray_runtime() ниже молча (без единой строки лога) пропустил
+# всю установку Xray из-за своей же защиты от сетевых операций при сборке
+# прошивки в постороннее ROOT. Снаружи это выглядело как "шаг 1 прошёл
+# ОК, шаг 2 падает - Xray не найден" без единой зацепки в логе. Берём
+# максимально уникальное имя переменной, чтобы ничего постороннее в
+# окружении больше не могло в неё случайно попасть.
+OWRT_REMOTE_ROOT="${OWRT_REMOTE_ROOT:-/}"
 SCRIPT_DIR="$(CDPATH= cd "$(dirname "$0")" 2>/dev/null && pwd)"
 
 # VodkinNET: fleet-standard colors/symbols, matching the palette used across
@@ -55,7 +65,7 @@ die() {
 }
 
 target_path() {
-	printf '%s/%s' "${ROOT%/}" "$1"
+	printf '%s/%s' "${OWRT_REMOTE_ROOT%/}" "$1"
 }
 
 vodkin_banner "OpenWrt Remote agent installer"
@@ -355,7 +365,7 @@ package_manager() {
 
 install_xray_runtime() {
 	local remote_bin
-	[ "${ROOT%/}" = "" ] || return 0
+	[ "${OWRT_REMOTE_ROOT%/}" = "" ] || return 0
 	remote_bin="$(target_path usr/sbin/owrt-remote)"
 	[ -x "$remote_bin" ] || die "missing $remote_bin after install"
 	info "Installing Xray to /tmp..."

@@ -2,11 +2,14 @@
 
 set -eu
 
-ROOT="${ROOT:-/}"
+# VodkinNET: не "ROOT" — см. комментарий в install.sh (живой баг
+# 2026-09-30/10-01: сторонняя переменная ROOT в окружении роутера молча
+# ломала install.sh). Та же защита здесь на всякий случай.
+OWRT_REMOTE_ROOT="${OWRT_REMOTE_ROOT:-/}"
 PURGE="${PURGE:-0}"
 
 target_path() {
-	printf '%s/%s' "${ROOT%/}" "$1"
+	printf '%s/%s' "${OWRT_REMOTE_ROOT%/}" "$1"
 }
 
 rmf() {
