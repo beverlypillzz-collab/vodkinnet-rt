@@ -1,0 +1,16 @@
+name: no-claude-author
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+      - name: Fail if Claude is author or co-author
+        run: |
+          if git log -50 --format='%ae%n%ce%n%B' | grep -iE 'anthropic\.com|claude-session|co-authored-by:.*claude'; then
+            echo "Claude authorship found in recent commits"; exit 1
+          fi

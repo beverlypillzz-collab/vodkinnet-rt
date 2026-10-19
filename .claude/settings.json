@@ -1,4 +1,10 @@
 {
   "includeCoAuthoredBy": false,
-  "attribution": { "commit": "", "pr": "" }
+  "attribution": { "commit": "", "pr": "" },
+  "env": {
+    "GIT_AUTHOR_NAME": "beverlypillzz-collab",
+    "GIT_AUTHOR_EMAIL": "beverlypillzz-collab@users.noreply.github.com",
+    "GIT_COMMITTER_NAME": "beverlypillzz-collab",
+    "GIT_COMMITTER_EMAIL": "beverlypillzz-collab@users.noreply.github.com"
+  }
 }
