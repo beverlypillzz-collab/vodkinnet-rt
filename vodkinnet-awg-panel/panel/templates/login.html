@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AWG Panel — вход</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+<script>try{var t=localStorage.getItem('awg-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body class="login-body">
+<form class="login-card" method="post">
+  <div class="brand brand-lg"><span class="logo"></span><span>AWG Panel</span></div>
+  <p class="muted">Управление клиентами AmneziaWG на виртуальных роутерах</p>
+  {% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+  <label class="field"><span>Пароль</span><input type="password" name="password" autofocus autocomplete="current-password"></label>
+  <button class="btn primary wide">Войти</button>
+  <p class="muted small center">v{{ version }}</p>
+</form>
+</body>
+</html>

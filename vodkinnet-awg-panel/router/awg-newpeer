@@ -1,0 +1,196 @@
+#!/bin/sh
+# awg-newpeer — выдача клиентов AmneziaWG на роутере OpenWrt
+#   awg-newpeer add  ИМЯ [-k ПУБЛИЧНЫЙ_КЛЮЧ_КЛИЕНТА] [-e ХОСТ[:ПОРТ]]
+#   awg-newpeer list
+#   awg-newpeer del  ИМЯ
+#   awg-newpeer pause ИМЯ | resume ИМЯ
+#   awg-newpeer dump        (имя, адрес, пауза, ключ, handshake, rx, tx — через табуляцию)
+#   awg-newpeer status      (состояние роутера + dump; используется панелью)
+# Без -k ключи клиента генерируются здесь и показываются ОДИН раз (нигде не хранятся).
+# Внешний адрес по умолчанию берётся из файла /etc/awg-endpoint (одна строка).
+IF=${AWG_IF:-awg0}
+TYPE="amneziawg_$IF"
+EPFILE=/etc/awg-endpoint
+
+die() { echo "ошибка: $*" >&2; exit 1; }
+
+secs() { uci show network 2>/dev/null | sed -n "s/^network\.\([^.=]*\)=$TYPE\$/\1/p"; }
+
+sec_by_name() {
+	for s in $(secs); do
+		[ "$(uci -q get network.$s.description)" = "$1" ] && { echo "$s"; return 0; }
+	done
+	return 1
+}
+
+emit() { v=$(uci -q get "network.$IF.$1"); [ -n "$v" ] && echo "$2 = $v"; }
+
+cmd_list() {
+	for s in $(secs); do
+		printf '%-20s %-18s %s\n' "$(uci -q get network.$s.description)" \
+			"$(uci -q get network.$s.allowed_ips)" "$(uci -q get network.$s.public_key | cut -c1-12)…"
+	done
+}
+
+cmd_del() {
+	[ -n "$1" ] || die "укажи имя клиента"
+	s=$(sec_by_name "$1") || die "клиент '$1' не найден"
+	pub=$(uci -q get network.$s.public_key)
+	awg set "$IF" peer "$pub" remove 2>/dev/null
+	uci delete network.$s
+	uci commit network
+	echo "клиент '$1' удалён"
+}
+
+cmd_pause() {
+	[ -n "$1" ] || die "укажи имя клиента"
+	s=$(sec_by_name "$1") || die "клиент '$1' не найден"
+	pub=$(uci -q get network.$s.public_key)
+	uci set network.$s.disabled=1
+	uci commit network
+	awg set "$IF" peer "$pub" remove 2>/dev/null
+	echo "клиент '$1' на паузе"
+}
+
+cmd_resume() {
+	[ -n "$1" ] || die "укажи имя клиента"
+	s=$(sec_by_name "$1") || die "клиент '$1' не найден"
+	pub=$(uci -q get network.$s.public_key)
+	ip=$(uci -q get network.$s.allowed_ips)
+	uci -q delete network.$s.disabled
+	uci commit network
+	awg set "$IF" peer "$pub" allowed-ips "$ip" persistent-keepalive 25 2>/dev/null \
+		|| echo "(на лету не добавилось — выполни: ifup $IF)" >&2
+	echo "клиент '$1' снова активен"
+}
+
+cmd_dump() {
+	RT=$(awg show "$IF" dump 2>/dev/null | tail -n +2)
+	for s in $(secs); do
+		pub=$(uci -q get network.$s.public_key)
+		hs=0; rx=0; tx=0
+		line=$(echo "$RT" | awk -F'\t' -v k="$pub" '$1==k {print $5"\t"$6"\t"$7}')
+		if [ -n "$line" ]; then
+			hs=$(echo "$line" | cut -f1); rx=$(echo "$line" | cut -f2); tx=$(echo "$line" | cut -f3)
+		fi
+		dis=$(uci -q get network.$s.disabled); [ "$dis" = 1 ] || dis=0
+		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(uci -q get network.$s.description)" \
+			"$(uci -q get network.$s.allowed_ips)" "$dis" "$pub" "$hs" "$rx" "$tx"
+	done
+}
+
+cmd_status() {
+	up=$(cut -d. -f1 /proc/uptime 2>/dev/null)
+	load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null)
+	cores=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null)
+	mt=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null)
+	ma=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo 2>/dev/null)
+	dk=$(df -k / 2>/dev/null | awk 'NR==2{print $2" "$3}')
+	echo "#sys uptime=${up:-0} load=${load:-0} cores=${cores:-1} mem_total=${mt:-0} mem_avail=${ma:-0} disk_total=${dk% *} disk_used=${dk#* }"
+	addr=$(uci -q get network.$IF.addresses | awk '{print $1}')
+	port=$(uci -q get network.$IF.listen_port)
+	pub=$(awg show "$IF" public-key 2>/dev/null)
+	echo "#awg iface=$IF addr=$addr port=$port pub=$pub"
+	cmd_dump
+}
+
+cmd_add() {
+	NAME=$1; shift
+	[ -n "$NAME" ] || die "укажи имя клиента"
+	CPUBIN=""; EP=""
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			-k) CPUBIN=$2; shift 2 ;;
+			-e) EP=$2; shift 2 ;;
+			*) die "неизвестный параметр $1" ;;
+		esac
+	done
+	sec_by_name "$NAME" >/dev/null && die "клиент '$NAME' уже есть"
+
+	ADDR=$(uci -q get network.$IF.addresses | awk '{print $1}')
+	[ -n "$ADDR" ] || die "у интерфейса $IF нет адреса (network.$IF.addresses)"
+	SRVIP=${ADDR%/*}
+	PREFIX=${SRVIP%.*}
+	PORT=$(uci -q get network.$IF.listen_port)
+	[ -n "$PORT" ] || die "у интерфейса $IF не задан listen_port"
+
+	# следующий свободный адрес клиента
+	MAX=1
+	for s in $(secs); do
+		for ip in $(uci -q get network.$s.allowed_ips); do
+			case "$ip" in
+				"$PREFIX".*) n=${ip#"$PREFIX".}; n=${n%%/*}
+					[ "$n" -gt "$MAX" ] 2>/dev/null && MAX=$n ;;
+			esac
+		done
+	done
+	N=$((MAX + 1))
+	[ "$N" -le 254 ] || die "в подсети $PREFIX.0/24 закончились адреса"
+	CIP="$PREFIX.$N"
+
+	if [ -n "$CPUBIN" ]; then
+		CPUB=$CPUBIN; CPRIV=""
+	else
+		CPRIV=$(awg genkey) || die "awg genkey не сработал"
+		CPUB=$(echo "$CPRIV" | awg pubkey)
+	fi
+
+	SPUB=$(awg show "$IF" public-key 2>/dev/null)
+	[ -n "$SPUB" ] || SPUB=$(uci -q get network.$IF.public_key)
+	[ -n "$SPUB" ] || SPUB=$(uci -q get network.$IF.private_key | awg pubkey)
+	[ -n "$SPUB" ] || die "не удалось получить публичный ключ роутера"
+
+	if [ -z "$EP" ] && [ -f "$EPFILE" ]; then EP=$(head -n1 "$EPFILE"); fi
+	[ -n "$EP" ] || EP="ВНЕШНИЙ_АДРЕС"
+	case "$EP" in *:*) ;; *) EP="$EP:$PORT" ;; esac
+
+	s=$(uci add network "$TYPE")
+	uci set network.$s.description="$NAME"
+	uci set network.$s.public_key="$CPUB"
+	uci add_list network.$s.allowed_ips="$CIP/32"
+	uci set network.$s.persistent_keepalive=25
+	uci commit network
+	awg set "$IF" peer "$CPUB" allowed-ips "$CIP/32" persistent-keepalive 25 2>/dev/null \
+		|| echo "(на лету не добавилось — выполни: ifup $IF)" >&2
+
+	if [ -z "$CPRIV" ]; then
+		echo "Клиент '$NAME' добавлен. Данные для настройки клиента:"
+		echo "  Адрес клиента : $CIP/32"
+		echo "  DNS           : $SRVIP"
+		echo "  Публ. ключ роутера : $SPUB"
+		echo "  Endpoint      : $EP"
+		return 0
+	fi
+
+	CONF=$(
+		echo "[Interface]"
+		echo "PrivateKey = $CPRIV"
+		echo "Address = $CIP/32"
+		echo "DNS = $SRVIP"
+		emit awg_jc Jc;     emit awg_jmin Jmin; emit awg_jmax Jmax
+		emit awg_s1 S1;     emit awg_s2 S2;     emit awg_s3 S3;   emit awg_s4 S4
+		emit awg_h1 H1;     emit awg_h2 H2;     emit awg_h3 H3;   emit awg_h4 H4
+		emit awg_i1 I1;     emit awg_i2 I2;     emit awg_i3 I3;   emit awg_i4 I4; emit awg_i5 I5
+		echo ""
+		echo "[Peer]"
+		echo "PublicKey = $SPUB"
+		echo "AllowedIPs = 0.0.0.0/0"
+		echo "Endpoint = $EP"
+		echo "PersistentKeepalive = 25"
+	)
+	echo "$CONF"
+	if [ -t 1 ] && command -v qrencode >/dev/null 2>&1; then
+		echo "$CONF" | qrencode -t ansiutf8
+	fi
+}
+
+case "$1" in
+	add)  shift; cmd_add "$@" ;;
+	list) cmd_list ;;
+	del)  shift; cmd_del "$@" ;;
+	pause)  shift; cmd_pause "$@" ;;
+	resume) shift; cmd_resume "$@" ;;
+	dump) cmd_dump ;;
+	status) cmd_status ;;
+	*) sed -n '2,11p' "$0" ;;
+esac
